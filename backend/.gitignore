@@ -5,11 +5,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Build output
-dist/
-build/
-.vite/
-
 # Environment variables
 .env
 .env.local
@@ -17,13 +12,17 @@ build/
 .env.test.local
 .env.production.local
 
-# Cache & logs
+# Build and logs
+dist/
+build/
+coverage/
+logs/
 *.log
 *.pid
 *.seed
 *.pid.lock
 
-# Editor & OS files
+# OS & Editor files
 .DS_Store
 Thumbs.db
 .idea/
@@ -33,6 +32,3 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
-
-# Test / coverage
-coverage/
