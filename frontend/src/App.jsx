@@ -8,8 +8,6 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import RequesterDashboard from "./pages/RequesterDashboard";
 import ConfirmerDashboard from "./pages/ConfirmerDashboard";
-import "./styles.css";
-
 export default function App() {
   const token = localStorage.getItem("token");
   const role = localStorage.getItem("role");
