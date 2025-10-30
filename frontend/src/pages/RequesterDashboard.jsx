@@ -1,21 +1,50 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  Alert,
+  AppBar,
+  Box,
+  Button,
+  Chip,
+  Container,
+  Paper,
+  Stack,
+  TextField,
+  Toolbar,
+  Typography,
+} from "@mui/material";
 import API from "../api";
-import "../styles.css";
 
 export default function RequesterDashboard() {
   const [description, setDescription] = useState("");
   const [items, setItems] = useState("");
-  const [message, setMessage] = useState("");
+  const [feedback, setFeedback] = useState(null);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const selectedItems = useMemo(
+    () =>
+      items
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    [items]
+  );
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setFeedback(null);
+
     try {
-      await API.post("/imports", { description, items: items.split(",") });
-      setMessage("✅ Import request created!");
+      await API.post("/imports", { description, items: selectedItems });
+      setFeedback({
+        severity: "success",
+        message: "Import request submitted successfully.",
+      });
       setDescription("");
       setItems("");
-    } catch {
-      setMessage("❌ Failed to create request");
+    } catch (error) {
+      setFeedback({
+        severity: "error",
+        message: "Something went wrong while creating the request.",
+      });
     }
   };
 
@@ -25,31 +54,80 @@ export default function RequesterDashboard() {
   };
 
   return (
-    <div className="dashboard">
-      <header>
-        <h1>Requester Dashboard</h1>
-        <button onClick={logout}>Logout</button>
-      </header>
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
+        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
+          <Box>
+            <Typography variant="h5" fontWeight={600} color="text.primary">
+              Requester workspace
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Create and track import requests for your team.
+            </Typography>
+          </Box>
+          <Button variant="contained" color="primary" onClick={logout}>
+            Logout
+          </Button>
+        </Toolbar>
+      </AppBar>
 
-      <form onSubmit={handleSubmit} className="card">
-        <h3>Create Import Request</h3>
-        <input
-          type="text"
-          placeholder="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          placeholder="Items (comma separated)"
-          value={items}
-          onChange={(e) => setItems(e.target.value)}
-          required
-        />
-        <button type="submit">Submit</button>
-        {message && <p>{message}</p>}
-      </form>
-    </div>
+      <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="md">
+        <Paper elevation={8} sx={{ p: { xs: 4, md: 6 } }}>
+          <Stack spacing={4}>
+            <Stack spacing={1}>
+              <Typography variant="h5">Create a new import request</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Provide a short description and list the items you need imported.
+              </Typography>
+            </Stack>
+
+            {feedback && (
+              <Alert severity={feedback.severity}>{feedback.message}</Alert>
+            )}
+
+            <Box component="form" onSubmit={handleSubmit} noValidate>
+              <Stack spacing={3}>
+                <TextField
+                  label="Description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="e.g. Electronics for Q2 rollout"
+                  required
+                  fullWidth
+                />
+                <TextField
+                  label="Items"
+                  value={items}
+                  onChange={(event) => setItems(event.target.value)}
+                  placeholder="Separate items with commas"
+                  helperText="Example: monitors, docking stations, travel adapters"
+                  required
+                  fullWidth
+                />
+
+                {selectedItems.length > 0 && (
+                  <Stack direction="row" flexWrap="wrap" gap={1}>
+                    {selectedItems.map((item) => (
+                      <Chip
+                        key={item}
+                        label={item}
+                        color="secondary"
+                        variant="outlined"
+                      />
+                    ))}
+                  </Stack>
+                )}
+
+                <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                  <Button type="submit" variant="contained" size="large">
+                    Submit request
+                  </Button>
+                </Box>
+              </Stack>
+            </Box>
+          </Stack>
+        </Paper>
+      </Container>
+    </Box>
   );
 }
