@@ -18,3 +18,21 @@ CREATE TABLE [dbo].[ImportRequests](
     [CreatedAt] DATETIME NOT NULL DEFAULT (GETDATE())     -- creation timestamp
 );
 GO
+
+IF OBJECT_ID('dbo.RequestNotifications', 'U') IS NOT NULL
+    DROP TABLE dbo.RequestNotifications;
+GO
+
+CREATE TABLE [dbo].[RequestNotifications](
+    [ID] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [RequestID] INT NOT NULL,
+    [Username] NVARCHAR(100) NOT NULL,
+    [Message] NVARCHAR(400) NOT NULL,
+    [Type] NVARCHAR(50) NOT NULL DEFAULT ('info'),
+    [CreatedAt] DATETIME NOT NULL DEFAULT (GETDATE()),
+    [ReadAt] DATETIME NULL,
+    CONSTRAINT FK_RequestNotifications_ImportRequests
+      FOREIGN KEY (RequestID) REFERENCES dbo.ImportRequests(ID)
+      ON DELETE CASCADE
+);
+GO

@@ -10,9 +10,10 @@ import {
 } from "@mui/material";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import EventRepeatRoundedIcon from "@mui/icons-material/EventRepeatRounded";
 import formatArticleCode from "../utils/formatArticle";
 
-export default function RequestCard({ req, onDecision }) {
+export default function RequestCard({ req, onDecision, onProposeDate }) {
   let formattedRequestDate = "N/A";
   if (req.RequestDate) {
     const date = new Date(req.RequestDate);
@@ -75,23 +76,45 @@ export default function RequestCard({ req, onDecision }) {
           </Typography>
         </Stack>
       </CardContent>
-      <CardActions sx={{ justifyContent: "space-between", px: 3, pb: 3 }}>
-        <Button
-          variant="outlined"
-          color="error"
-          startIcon={<CloseRoundedIcon />}
-          onClick={() => onDecision(req.ID, "rejected")}
-        >
-          Reject
-        </Button>
-        <Button
-          variant="contained"
-          color="secondary"
-          startIcon={<CheckRoundedIcon />}
-          onClick={() => onDecision(req.ID, "approved")}
-        >
-          Approve
-        </Button>
+      <CardActions
+        sx={{
+          px: 3,
+          pb: 3,
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 1.5,
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        {onProposeDate && (
+          <Button
+            variant="text"
+            color="secondary"
+            startIcon={<EventRepeatRoundedIcon />}
+            onClick={() => onProposeDate(req)}
+          >
+            Propose new date
+          </Button>
+        )}
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<CloseRoundedIcon />}
+            onClick={() => onDecision(req.ID, "rejected")}
+          >
+            Reject
+          </Button>
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={<CheckRoundedIcon />}
+            onClick={() => onDecision(req.ID, "approved")}
+          >
+            Approve
+          </Button>
+        </Box>
       </CardActions>
     </Card>
   );
