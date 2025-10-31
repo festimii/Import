@@ -8,11 +8,21 @@ import {
   CircularProgress,
   Container,
   Divider,
+  FormControl,
+  InputLabel,
   List,
   ListItem,
   ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -30,6 +40,10 @@ export default function AdminDashboard() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [userFeedback, setUserFeedback] = useState(null);
+  const [updatingUser, setUpdatingUser] = useState(null);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -47,9 +61,63 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    setUserFeedback(null);
+    try {
+      const res = await API.get("/auth/users");
+      setUsers(res.data);
+    } catch (error) {
+      setUserFeedback({
+        severity: "error",
+        message: "Unable to load the user directory right now.",
+      });
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadRequests();
+    loadUsers();
   }, []);
+
+  const handleRoleChange = async (username, newRole) => {
+    const currentUser = users.find((user) => user.Username === username);
+    if (!currentUser || currentUser.Role === newRole) {
+      return;
+    }
+
+    setUserFeedback(null);
+    setUpdatingUser(username);
+    setUsers((prev) =>
+      prev.map((user) =>
+        user.Username === username ? { ...user, Role: newRole } : user
+      )
+    );
+
+    try {
+      await API.patch(`/auth/users/${encodeURIComponent(username)}`, {
+        role: newRole,
+      });
+      setUserFeedback({
+        severity: "success",
+        message: `Updated ${username}'s role to ${newRole}.`,
+      });
+    } catch (error) {
+      setUsers((prev) =>
+        prev.map((user) =>
+          user.Username === username ? { ...user, Role: currentUser.Role } : user
+        )
+      );
+      setUserFeedback({
+        severity: "error",
+        message: "We couldn't update that role. Please try again.",
+      });
+    } finally {
+      setUpdatingUser(null);
+    }
+  };
 
   const eventsByDate = useMemo(() => {
     const grouped = new Map();
@@ -176,6 +244,75 @@ export default function AdminDashboard() {
             </Stack>
           </Paper>
         </Stack>
+      </Container>
+      <Container sx={{ pb: { xs: 4, md: 6 } }} maxWidth="lg">
+        <Paper elevation={4} sx={{ p: { xs: 3, md: 5 } }}>
+          <Stack spacing={3}>
+            <Box>
+              <Typography variant="h6">User management</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Adjust workspace permissions. Only administrators can change
+                team member roles.
+              </Typography>
+            </Box>
+            {userFeedback && (
+              <Alert severity={userFeedback.severity}>{userFeedback.message}</Alert>
+            )}
+            {usersLoading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+                <CircularProgress color="primary" />
+              </Box>
+            ) : users.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No users found.
+              </Typography>
+            ) : (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600 }}>Username</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Role</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {users.map((user) => {
+                      const labelId = `role-select-${encodeURIComponent(
+                        user.Username
+                      )}`;
+                      return (
+                        <TableRow key={user.Username}>
+                          <TableCell>{user.Username}</TableCell>
+                          <TableCell>
+                            <FormControl size="small" fullWidth>
+                              <InputLabel id={labelId}>Role</InputLabel>
+                              <Select
+                                labelId={labelId}
+                                label="Role"
+                                value={user.Role}
+                                onChange={(event) =>
+                                  handleRoleChange(
+                                    user.Username,
+                                    event.target.value
+                                  )
+                                }
+                                disabled={updatingUser === user.Username}
+                              >
+                                <MenuItem value="requester">Requester</MenuItem>
+                                <MenuItem value="confirmer">Confirmer</MenuItem>
+                                <MenuItem value="admin">Admin</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </Stack>
+        </Paper>
       </Container>
     </Box>
   );

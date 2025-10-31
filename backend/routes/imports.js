@@ -33,16 +33,27 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
       return parsed;
     })();
 
+    const requestDateSqlValue = requestDateValue.toISOString().split("T")[0];
+
     const pool = await poolPromise;
     const result = await pool
       .request()
-      .input("Requester", req.user.username)
-      .input("RequestDate", requestDateValue.toISOString().split("T")[0])
-      .input("Importer", importer)
-      .input("Article", article)
-      .input("PalletCount", parsedPalletCount)
-      .query(`INSERT INTO ImportRequests (Requester, RequestDate, Importer, Article, PalletCount)
-              OUTPUT INSERTED.* VALUES (@Requester, @RequestDate, @Importer, @Article, @PalletCount)`);
+      .input("DataKerkeses", requestDateSqlValue)
+      .input("Importuesi", importer)
+      .input("Artikulli", article)
+      .input("NumriPaletave", parsedPalletCount)
+      .input("Useri", req.user.username)
+      .query(`INSERT INTO ImportRequests (DataKerkeses, Importuesi, Artikulli, NumriPaletave, Useri)
+              OUTPUT INSERTED.ID,
+                     INSERTED.DataKerkeses AS RequestDate,
+                     INSERTED.Importuesi AS Importer,
+                     INSERTED.Artikulli AS Article,
+                     INSERTED.NumriPaletave AS PalletCount,
+                     INSERTED.Useri AS Requester,
+                     INSERTED.Status,
+                     INSERTED.ConfirmedBy,
+                     INSERTED.CreatedAt
+              VALUES (@DataKerkeses, @Importuesi, @Artikulli, @NumriPaletave, @Useri)`);
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("Create error:", err.message);
@@ -59,9 +70,18 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
     const pool = await poolPromise;
     const result = await pool
       .request()
-      .query(
-        "SELECT * FROM ImportRequests WHERE Status = 'pending' ORDER BY CreatedAt DESC"
-      );
+      .query(`SELECT ID,
+                     DataKerkeses AS RequestDate,
+                     Importuesi AS Importer,
+                     Artikulli AS Article,
+                     NumriPaletave AS PalletCount,
+                     Useri AS Requester,
+                     Status,
+                     ConfirmedBy,
+                     CreatedAt
+              FROM ImportRequests
+              WHERE Status = 'pending'
+              ORDER BY CreatedAt DESC`);
     res.json(result.recordset);
   } catch (err) {
     console.error("Fetch error:", err.message);
@@ -75,9 +95,18 @@ router.get("/confirmed", verifyRole(["admin"]), async (req, res) => {
     const pool = await poolPromise;
     const result = await pool
       .request()
-      .query(
-        "SELECT * FROM ImportRequests WHERE Status = 'approved' ORDER BY RequestDate ASC, CreatedAt DESC"
-      );
+      .query(`SELECT ID,
+                     DataKerkeses AS RequestDate,
+                     Importuesi AS Importer,
+                     Artikulli AS Article,
+                     NumriPaletave AS PalletCount,
+                     Useri AS Requester,
+                     Status,
+                     ConfirmedBy,
+                     CreatedAt
+              FROM ImportRequests
+              WHERE Status = 'approved'
+              ORDER BY DataKerkeses ASC, CreatedAt DESC`);
     res.json(result.recordset);
   } catch (err) {
     console.error("Fetch approved error:", err.message);
@@ -94,9 +123,19 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       .request()
       .input("ID", req.params.id)
       .input("Status", status)
-      .input("ConfirmedBy", req.user.username).query(`UPDATE ImportRequests
+      .input("ConfirmedBy", req.user.username)
+      .query(`UPDATE ImportRequests
               SET Status = @Status, ConfirmedBy = @ConfirmedBy
-              OUTPUT INSERTED.* WHERE ID = @ID`);
+              OUTPUT INSERTED.ID,
+                     INSERTED.DataKerkeses AS RequestDate,
+                     INSERTED.Importuesi AS Importer,
+                     INSERTED.Artikulli AS Article,
+                     INSERTED.NumriPaletave AS PalletCount,
+                     INSERTED.Useri AS Requester,
+                     INSERTED.Status,
+                     INSERTED.ConfirmedBy,
+                     INSERTED.CreatedAt
+              WHERE ID = @ID`);
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("Update error:", err.message);
