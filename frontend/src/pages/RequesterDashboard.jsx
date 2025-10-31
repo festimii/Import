@@ -12,6 +12,7 @@ import {
   Typography,
 } from "@mui/material";
 import API from "../api";
+import formatArticleCode from "../utils/formatArticle";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -19,6 +20,7 @@ export default function RequesterDashboard() {
   const currentDate = today();
   const [importer, setImporter] = useState("");
   const [article, setArticle] = useState("");
+  const [arrivalDate, setArrivalDate] = useState("");
   const [palletCount, setPalletCount] = useState("");
   const [feedback, setFeedback] = useState(null);
 
@@ -26,11 +28,20 @@ export default function RequesterDashboard() {
     event.preventDefault();
     setFeedback(null);
 
+    if (!arrivalDate) {
+      setFeedback({
+        severity: "error",
+        message: "Please provide an arrival date for the import.",
+      });
+      return;
+    }
+
     try {
       await API.post("/imports", {
         requestDate: currentDate,
+        arrivalDate,
         importer,
-        article,
+        article: formatArticleCode(article),
         palletCount: Number(palletCount),
       });
       setFeedback({
@@ -39,6 +50,7 @@ export default function RequesterDashboard() {
       });
       setImporter("");
       setArticle("");
+      setArrivalDate("");
       setPalletCount("");
     } catch (error) {
       setFeedback({
@@ -111,6 +123,17 @@ export default function RequesterDashboard() {
                   value={article}
                   onChange={(event) => setArticle(event.target.value)}
                   placeholder="Describe the article"
+                  helperText="Article codes shorter than 6 digits are padded automatically"
+                  required
+                  fullWidth
+                />
+                <TextField
+                  label="Arrival date (Data Arritjes)"
+                  type="date"
+                  value={arrivalDate}
+                  onChange={(event) => setArrivalDate(event.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  helperText="Choose when the import is expected to arrive"
                   required
                   fullWidth
                 />

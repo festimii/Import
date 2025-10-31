@@ -10,17 +10,30 @@ import {
 } from "@mui/material";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import formatArticleCode from "../utils/formatArticle";
 
 export default function RequestCard({ req, onDecision }) {
-  let formattedDate = "N/A";
+  let formattedRequestDate = "N/A";
   if (req.RequestDate) {
     const date = new Date(req.RequestDate);
     if (!Number.isNaN(date.getTime())) {
-      formattedDate = date.toLocaleDateString();
+      formattedRequestDate = date.toLocaleDateString();
     } else if (typeof req.RequestDate === "string") {
-      formattedDate = req.RequestDate;
+      formattedRequestDate = req.RequestDate;
     }
   }
+
+  let formattedArrivalDate = "N/A";
+  if (req.ArrivalDate) {
+    const date = new Date(req.ArrivalDate);
+    if (!Number.isNaN(date.getTime())) {
+      formattedArrivalDate = date.toLocaleDateString();
+    } else if (typeof req.ArrivalDate === "string") {
+      formattedArrivalDate = req.ArrivalDate;
+    }
+  }
+
+  const articleValue = formatArticleCode(req.Article);
 
   return (
     <Card elevation={6} sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -30,7 +43,7 @@ export default function RequestCard({ req, onDecision }) {
             <Typography variant="overline" color="primary" sx={{ letterSpacing: 1 }}>
               Request #{req.ID}
             </Typography>
-            <Typography variant="h6">{req.Article}</Typography>
+            <Typography variant="h6">{articleValue}</Typography>
           </Box>
           <Stack spacing={0.5}>
             <Typography variant="subtitle2" color="text.secondary">
@@ -42,7 +55,13 @@ export default function RequestCard({ req, onDecision }) {
             <Typography variant="subtitle2" color="text.secondary">
               Request date
             </Typography>
-            <Typography variant="body1">{formattedDate}</Typography>
+            <Typography variant="body1">{formattedRequestDate}</Typography>
+          </Stack>
+          <Stack spacing={0.5}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Arrival date (Data Arritjes)
+            </Typography>
+            <Typography variant="body1">{formattedArrivalDate}</Typography>
           </Stack>
           <Stack spacing={0.5}>
             <Typography variant="subtitle2" color="text.secondary">
