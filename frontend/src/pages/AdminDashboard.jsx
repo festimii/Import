@@ -8,21 +8,11 @@ import {
   CircularProgress,
   Container,
   Divider,
-  FormControl,
-  InputLabel,
   List,
   ListItem,
   ListItemText,
-  MenuItem,
   Paper,
-  Select,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -32,6 +22,8 @@ import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { PickersDay } from "@mui/x-date-pickers/PickersDay";
 import { format } from "date-fns";
 import API from "../api";
+import UserManagementDialog from "../components/UserManagementDialog";
+import formatArticleCode from "../utils/formatArticle";
 
 const formatKey = (date) => format(date, "yyyy-MM-dd");
 
@@ -44,6 +36,7 @@ export default function AdminDashboard() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [userFeedback, setUserFeedback] = useState(null);
   const [updatingUser, setUpdatingUser] = useState(null);
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -79,8 +72,13 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadRequests();
-    loadUsers();
   }, []);
+
+  useEffect(() => {
+    if (isUserDialogOpen) {
+      loadUsers();
+    }
+  }, [isUserDialogOpen]);
 
   const handleRoleChange = async (username, newRole) => {
     const currentUser = users.find((user) => user.Username === username);
@@ -122,8 +120,8 @@ export default function AdminDashboard() {
   const eventsByDate = useMemo(() => {
     const grouped = new Map();
     requests.forEach((request) => {
-      if (!request.RequestDate) return;
-      const date = new Date(request.RequestDate);
+      if (!request.ArrivalDate) return;
+      const date = new Date(request.ArrivalDate);
       if (Number.isNaN(date.getTime())) return;
       const key = formatKey(date);
       const existing = grouped.get(key) ?? [];
@@ -176,10 +174,22 @@ export default function AdminDashboard() {
     window.location.reload();
   };
 
+  const handleOpenUserDialog = () => {
+    setUserFeedback(null);
+    setIsUserDialogOpen(true);
+  };
+
+  const handleCloseUserDialog = () => {
+    setIsUserDialogOpen(false);
+    setUserFeedback(null);
+  };
+
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
+        <Toolbar
+          sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}
+        >
           <Box>
             <Typography variant="h5" fontWeight={600} color="text.primary">
               Admin workspace
@@ -188,9 +198,14 @@ export default function AdminDashboard() {
               Track approved import requests and anticipate upcoming arrivals.
             </Typography>
           </Box>
-          <Button variant="contained" color="primary" onClick={logout}>
-            Logout
-          </Button>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Button variant="outlined" onClick={handleOpenUserDialog}>
+              Manage users
+            </Button>
+            <Button variant="contained" color="primary" onClick={logout}>
+              Logout
+            </Button>
+          </Stack>
         </Toolbar>
       </AppBar>
 
@@ -231,8 +246,32 @@ export default function AdminDashboard() {
                         {eventsForSelectedDate.map((request) => (
                           <ListItem key={request.ID} alignItems="flex-start">
                             <ListItemText
-                              primary={`${request.Importer} · ${request.Article}`}
-                              secondary={`Pallets: ${request.PalletCount ?? "N/A"} • Confirmed by ${request.ConfirmedBy ?? "Unknown"}`}
+                              primary={`${request.Importer} · ${formatArticleCode(request.Article)}`}
+                              secondary={(() => {
+                                const requestDate = (() => {
+                                  if (!request.RequestDate) return "N/A";
+                                  const parsed = new Date(request.RequestDate);
+                                  if (Number.isNaN(parsed.getTime())) {
+                                    return request.RequestDate;
+                                  }
+                                  return format(parsed, "MMMM d, yyyy");
+                                })();
+
+                                const arrivalDate = (() => {
+                                  if (!request.ArrivalDate) return "N/A";
+                                  const parsed = new Date(request.ArrivalDate);
+                                  if (Number.isNaN(parsed.getTime())) {
+                                    return request.ArrivalDate;
+                                  }
+                                  return format(parsed, "MMMM d, yyyy");
+                                })();
+
+                                return `Arrival: ${arrivalDate} • Pallets: ${
+                                  request.PalletCount ?? "N/A"
+                                } • Request date: ${requestDate} • Confirmed by ${
+                                  request.ConfirmedBy ?? "Unknown"
+                                }`;
+                              })()}
                             />
                           </ListItem>
                         ))}
@@ -245,75 +284,16 @@ export default function AdminDashboard() {
           </Paper>
         </Stack>
       </Container>
-      <Container sx={{ pb: { xs: 4, md: 6 } }} maxWidth="lg">
-        <Paper elevation={4} sx={{ p: { xs: 3, md: 5 } }}>
-          <Stack spacing={3}>
-            <Box>
-              <Typography variant="h6">User management</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Adjust workspace permissions. Only administrators can change
-                team member roles.
-              </Typography>
-            </Box>
-            {userFeedback && (
-              <Alert severity={userFeedback.severity}>{userFeedback.message}</Alert>
-            )}
-            {usersLoading ? (
-              <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
-                <CircularProgress color="primary" />
-              </Box>
-            ) : users.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                No users found.
-              </Typography>
-            ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 600 }}>Username</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Role</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {users.map((user) => {
-                      const labelId = `role-select-${encodeURIComponent(
-                        user.Username
-                      )}`;
-                      return (
-                        <TableRow key={user.Username}>
-                          <TableCell>{user.Username}</TableCell>
-                          <TableCell>
-                            <FormControl size="small" fullWidth>
-                              <InputLabel id={labelId}>Role</InputLabel>
-                              <Select
-                                labelId={labelId}
-                                label="Role"
-                                value={user.Role}
-                                onChange={(event) =>
-                                  handleRoleChange(
-                                    user.Username,
-                                    event.target.value
-                                  )
-                                }
-                                disabled={updatingUser === user.Username}
-                              >
-                                <MenuItem value="requester">Requester</MenuItem>
-                                <MenuItem value="confirmer">Confirmer</MenuItem>
-                                <MenuItem value="admin">Admin</MenuItem>
-                              </Select>
-                            </FormControl>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </Stack>
-        </Paper>
-      </Container>
+      <UserManagementDialog
+        open={isUserDialogOpen}
+        onClose={handleCloseUserDialog}
+        users={users}
+        loading={usersLoading}
+        feedback={userFeedback}
+        onReload={loadUsers}
+        onRoleChange={handleRoleChange}
+        updatingUser={updatingUser}
+      />
     </Box>
   );
 }

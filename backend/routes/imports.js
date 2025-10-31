@@ -5,10 +5,29 @@ import { verifyRole } from "../middleware/auth.js";
 const router = express.Router();
 
 // ---------- CREATE REQUEST (Requester) ----------
-router.post("/", verifyRole(["requester"]), async (req, res) => {
-  const { requestDate, importer, article, palletCount } = req.body;
+const normalizeArticleCode = (value) => {
+  if (value === null || value === undefined) {
+    return value;
+  }
 
-  if (!importer || !article || palletCount === undefined) {
+  const stringValue = String(value).trim();
+  if (/^\d{1,6}$/.test(stringValue)) {
+    return stringValue.padStart(6, "0");
+  }
+
+  return stringValue;
+};
+
+const mapArticles = (records) =>
+  records.map((record) => ({
+    ...record,
+    Article: normalizeArticleCode(record.Article),
+  }));
+
+router.post("/", verifyRole(["requester"]), async (req, res) => {
+  const { requestDate, arrivalDate, importer, article, palletCount } = req.body;
+
+  if (!importer || !article || palletCount === undefined || !arrivalDate) {
     return res
       .status(400)
       .json({ message: "Missing required fields for import request." });
@@ -33,19 +52,32 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
       return parsed;
     })();
 
+    const arrivalDateValue = (() => {
+      const parsed = new Date(arrivalDate);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error("Invalid arrival date provided.");
+      }
+      return parsed;
+    })();
+
     const requestDateSqlValue = requestDateValue.toISOString().split("T")[0];
+    const arrivalDateSqlValue = arrivalDateValue.toISOString().split("T")[0];
+
+    const normalizedArticle = normalizeArticleCode(article);
 
     const pool = await poolPromise;
     const result = await pool
       .request()
       .input("DataKerkeses", requestDateSqlValue)
+      .input("DataArritjes", arrivalDateSqlValue)
       .input("Importuesi", importer)
-      .input("Artikulli", article)
+      .input("Artikulli", normalizedArticle)
       .input("NumriPaletave", parsedPalletCount)
       .input("Useri", req.user.username)
-      .query(`INSERT INTO ImportRequests (DataKerkeses, Importuesi, Artikulli, NumriPaletave, Useri)
+      .query(`INSERT INTO ImportRequests (DataKerkeses, DataArritjes, Importuesi, Artikulli, NumriPaletave, Useri)
               OUTPUT INSERTED.ID,
                      INSERTED.DataKerkeses AS RequestDate,
+                     INSERTED.DataArritjes AS ArrivalDate,
                      INSERTED.Importuesi AS Importer,
                      INSERTED.Artikulli AS Article,
                      INSERTED.NumriPaletave AS PalletCount,
@@ -53,11 +85,15 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
                      INSERTED.Status,
                      INSERTED.ConfirmedBy,
                      INSERTED.CreatedAt
-              VALUES (@DataKerkeses, @Importuesi, @Artikulli, @NumriPaletave, @Useri)`);
-    res.json(result.recordset[0]);
+              VALUES (@DataKerkeses, @DataArritjes, @Importuesi, @Artikulli, @NumriPaletave, @Useri)`);
+    const [record] = mapArticles(result.recordset);
+    res.json(record);
   } catch (err) {
     console.error("Create error:", err.message);
-    if (err.message === "Invalid request date provided.") {
+    if (
+      err.message === "Invalid request date provided." ||
+      err.message === "Invalid arrival date provided."
+    ) {
       return res.status(400).json({ message: err.message });
     }
     res.status(500).json({ message: "Server error" });
@@ -72,6 +108,7 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
       .request()
       .query(`SELECT ID,
                      DataKerkeses AS RequestDate,
+                     DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
                      NumriPaletave AS PalletCount,
@@ -82,7 +119,7 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
               FROM ImportRequests
               WHERE Status = 'pending'
               ORDER BY CreatedAt DESC`);
-    res.json(result.recordset);
+    res.json(mapArticles(result.recordset));
   } catch (err) {
     console.error("Fetch error:", err.message);
     res.status(500).json({ message: "Server error" });
@@ -97,6 +134,7 @@ router.get("/confirmed", verifyRole(["admin"]), async (req, res) => {
       .request()
       .query(`SELECT ID,
                      DataKerkeses AS RequestDate,
+                     DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
                      NumriPaletave AS PalletCount,
@@ -106,8 +144,8 @@ router.get("/confirmed", verifyRole(["admin"]), async (req, res) => {
                      CreatedAt
               FROM ImportRequests
               WHERE Status = 'approved'
-              ORDER BY DataKerkeses ASC, CreatedAt DESC`);
-    res.json(result.recordset);
+              ORDER BY DataArritjes ASC, CreatedAt DESC`);
+    res.json(mapArticles(result.recordset));
   } catch (err) {
     console.error("Fetch approved error:", err.message);
     res.status(500).json({ message: "Server error" });
@@ -128,6 +166,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
               SET Status = @Status, ConfirmedBy = @ConfirmedBy
               OUTPUT INSERTED.ID,
                      INSERTED.DataKerkeses AS RequestDate,
+                     INSERTED.DataArritjes AS ArrivalDate,
                      INSERTED.Importuesi AS Importer,
                      INSERTED.Artikulli AS Article,
                      INSERTED.NumriPaletave AS PalletCount,
@@ -136,7 +175,8 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                      INSERTED.ConfirmedBy,
                      INSERTED.CreatedAt
               WHERE ID = @ID`);
-    res.json(result.recordset[0]);
+    const [record] = mapArticles(result.recordset);
+    res.json(record);
   } catch (err) {
     console.error("Update error:", err.message);
     res.status(500).json({ message: "Server error" });

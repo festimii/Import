@@ -8,6 +8,7 @@ GO
 CREATE TABLE [dbo].[ImportRequests](
     [ID] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     [DataKerkeses] DATETIME NOT NULL DEFAULT (GETDATE()), -- request date
+    [DataArritjes] DATETIME NULL,                          -- arrival date
     [Importuesi] NVARCHAR(100) NOT NULL,                  -- importer name
     [Artikulli] NVARCHAR(255) NOT NULL,                   -- article name or code
     [NumriPaletave] INT NOT NULL DEFAULT (0),             -- number of pallets
