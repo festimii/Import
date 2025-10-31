@@ -8,7 +8,7 @@ const router = express.Router();
 router.post("/", verifyRole(["requester"]), async (req, res) => {
   const { requestDate, importer, article, palletCount } = req.body;
 
-  if (!requestDate || !importer || !article || palletCount === undefined) {
+  if (!importer || !article || palletCount === undefined) {
     return res
       .status(400)
       .json({ message: "Missing required fields for import request." });
@@ -22,13 +22,17 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
       .json({ message: "Pallet count must be a non-negative number." });
   }
 
-  const requestDateValue = new Date(requestDate);
-
-  if (Number.isNaN(requestDateValue.getTime())) {
-    return res.status(400).json({ message: "Invalid request date provided." });
-  }
-
   try {
+    const requestDateValue = (() => {
+      if (!requestDate) return new Date();
+
+      const parsed = new Date(requestDate);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error("Invalid request date provided.");
+      }
+      return parsed;
+    })();
+
     const pool = await poolPromise;
     const result = await pool
       .request()
@@ -42,6 +46,9 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("Create error:", err.message);
+    if (err.message === "Invalid request date provided.") {
+      return res.status(400).json({ message: err.message });
+    }
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -58,6 +65,22 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error("Fetch error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---------- GET APPROVED REQUESTS (Admin) ----------
+router.get("/confirmed", verifyRole(["admin"]), async (req, res) => {
+  try {
+    const pool = await poolPromise;
+    const result = await pool
+      .request()
+      .query(
+        "SELECT * FROM ImportRequests WHERE Status = 'approved' ORDER BY RequestDate ASC, CreatedAt DESC"
+      );
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Fetch approved error:", err.message);
     res.status(500).json({ message: "Server error" });
   }
 });

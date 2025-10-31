@@ -16,7 +16,7 @@ import API from "../api";
 const today = () => new Date().toISOString().split("T")[0];
 
 export default function RequesterDashboard() {
-  const [requestDate, setRequestDate] = useState(today());
+  const currentDate = today();
   const [importer, setImporter] = useState("");
   const [article, setArticle] = useState("");
   const [palletCount, setPalletCount] = useState("");
@@ -28,7 +28,7 @@ export default function RequesterDashboard() {
 
     try {
       await API.post("/imports", {
-        requestDate,
+        requestDate: currentDate,
         importer,
         article,
         palletCount: Number(palletCount),
@@ -37,7 +37,6 @@ export default function RequesterDashboard() {
         severity: "success",
         message: "Import request submitted successfully.",
       });
-      setRequestDate(today());
       setImporter("");
       setArticle("");
       setPalletCount("");
@@ -92,9 +91,10 @@ export default function RequesterDashboard() {
                 <TextField
                   label="Request date"
                   type="date"
-                  value={requestDate}
-                  onChange={(event) => setRequestDate(event.target.value)}
+                  value={currentDate}
+                  disabled
                   InputLabelProps={{ shrink: true }}
+                  helperText="Automatically set to today's date"
                   required
                   fullWidth
                 />
