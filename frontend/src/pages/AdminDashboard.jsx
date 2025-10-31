@@ -1,0 +1,182 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  AppBar,
+  Badge,
+  Box,
+  Button,
+  CircularProgress,
+  Container,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  Paper,
+  Stack,
+  Toolbar,
+  Typography,
+} from "@mui/material";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { DateCalendar } from "@mui/x-date-pickers/DateCalendar";
+import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
+import { PickersDay } from "@mui/x-date-pickers/PickersDay";
+import { format } from "date-fns";
+import API from "../api";
+
+const formatKey = (date) => format(date, "yyyy-MM-dd");
+
+export default function AdminDashboard() {
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [feedback, setFeedback] = useState(null);
+
+  const loadRequests = async () => {
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const res = await API.get("/imports/confirmed");
+      setRequests(res.data);
+    } catch (error) {
+      setFeedback({
+        severity: "error",
+        message: "We couldn't load confirmed arrivals. Please retry shortly.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRequests();
+  }, []);
+
+  const eventsByDate = useMemo(() => {
+    const grouped = new Map();
+    requests.forEach((request) => {
+      if (!request.RequestDate) return;
+      const date = new Date(request.RequestDate);
+      if (Number.isNaN(date.getTime())) return;
+      const key = formatKey(date);
+      const existing = grouped.get(key) ?? [];
+      existing.push(request);
+      grouped.set(key, existing);
+    });
+    return grouped;
+  }, [requests]);
+
+  const eventsForSelectedDate = useMemo(() => {
+    if (!(selectedDate instanceof Date) || Number.isNaN(selectedDate.getTime())) {
+      return [];
+    }
+
+    const key = formatKey(selectedDate);
+    return eventsByDate.get(key) ?? [];
+  }, [eventsByDate, selectedDate]);
+
+  const formattedSelectedDate = useMemo(() => {
+    if (!(selectedDate instanceof Date) || Number.isNaN(selectedDate.getTime())) {
+      return "Select a date";
+    }
+
+    return format(selectedDate, "MMMM d, yyyy");
+  }, [selectedDate]);
+
+  const renderDay = (dayProps) => {
+    const { day } = dayProps;
+    if (!(day instanceof Date) || Number.isNaN(day.getTime())) {
+      return <PickersDay {...dayProps} />;
+    }
+
+    const key = formatKey(day);
+    const events = eventsByDate.get(key) ?? [];
+    const showBadge = events.length > 0;
+
+    return (
+      <Badge
+        overlap="circular"
+        color="secondary"
+        badgeContent={showBadge ? events.length : undefined}
+      >
+        <PickersDay {...dayProps} />
+      </Badge>
+    );
+  };
+
+  const logout = () => {
+    localStorage.clear();
+    window.location.reload();
+  };
+
+  return (
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
+        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
+          <Box>
+            <Typography variant="h5" fontWeight={600} color="text.primary">
+              Admin workspace
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Track approved import requests and anticipate upcoming arrivals.
+            </Typography>
+          </Box>
+          <Button variant="contained" color="primary" onClick={logout}>
+            Logout
+          </Button>
+        </Toolbar>
+      </AppBar>
+
+      <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
+        <Stack spacing={3}>
+          {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+
+          <Paper elevation={4} sx={{ p: { xs: 3, md: 5 } }}>
+            <Stack spacing={4}>
+              <Typography variant="h6">
+                Confirmed arrivals overview
+              </Typography>
+              {loading ? (
+                <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                  <CircularProgress color="primary" />
+                </Box>
+              ) : (
+                <Stack direction={{ xs: "column", md: "row" }} spacing={4}>
+                  <LocalizationProvider dateAdapter={AdapterDateFns}>
+                    <DateCalendar
+                      value={selectedDate}
+                      onChange={(value) => value && setSelectedDate(value)}
+                      slots={{ day: renderDay }}
+                    />
+                  </LocalizationProvider>
+
+                  <Box sx={{ flexGrow: 1 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      {formattedSelectedDate}
+                    </Typography>
+                    <Divider sx={{ mb: 2 }} />
+                    {eventsForSelectedDate.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No confirmed arrivals scheduled for this day.
+                      </Typography>
+                    ) : (
+                      <List dense>
+                        {eventsForSelectedDate.map((request) => (
+                          <ListItem key={request.ID} alignItems="flex-start">
+                            <ListItemText
+                              primary={`${request.Importer} · ${request.Article}`}
+                              secondary={`Pallets: ${request.PalletCount ?? "N/A"} • Confirmed by ${request.ConfirmedBy ?? "Unknown"}`}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Box>
+                </Stack>
+              )}
+            </Stack>
+          </Paper>
+        </Stack>
+      </Container>
+    </Box>
+  );
+}
