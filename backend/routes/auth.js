@@ -2,6 +2,7 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { poolPromise } from "../db.js";
+import { verifyRole } from "../middleware/auth.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -60,6 +61,54 @@ router.post("/register", async (req, res) => {
     res.json({ message: "User registered successfully" });
   } catch (err) {
     console.error("Register error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---------- USER MANAGEMENT (Admin only) ----------
+router.get("/users", verifyRole(["admin"]), async (req, res) => {
+  try {
+    const pool = await poolPromise;
+    const result = await pool
+      .request()
+      .query("SELECT Username, Role FROM Users ORDER BY Username ASC");
+
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("List users error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.patch("/users/:username", verifyRole(["admin"]), async (req, res) => {
+  const { username } = req.params;
+  const { role } = req.body;
+  const allowedRoles = ["requester", "confirmer", "admin"];
+
+  if (!allowedRoles.includes(role)) {
+    return res.status(400).json({ message: "Invalid role provided." });
+  }
+
+  try {
+    const pool = await poolPromise;
+    const updateResult = await pool
+      .request()
+      .input("Role", role)
+      .input("Username", username)
+      .query("UPDATE Users SET Role = @Role WHERE Username = @Username");
+
+    if (updateResult.rowsAffected[0] === 0) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const refreshed = await pool
+      .request()
+      .input("Username", username)
+      .query("SELECT Username, Role FROM Users WHERE Username = @Username");
+
+    res.json(refreshed.recordset[0]);
+  } catch (err) {
+    console.error("Update role error:", err.message);
     res.status(500).json({ message: "Server error" });
   }
 });
