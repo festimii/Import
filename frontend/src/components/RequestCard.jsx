@@ -4,7 +4,6 @@ import {
   Card,
   CardActions,
   CardContent,
-  Chip,
   Divider,
   Stack,
   Typography,
@@ -13,14 +12,14 @@ import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 
 export default function RequestCard({ req, onDecision }) {
-  let items = [];
-  try {
-    const parsed = JSON.parse(req.Items);
-    if (Array.isArray(parsed)) {
-      items = parsed;
+  let formattedDate = "N/A";
+  if (req.RequestDate) {
+    const date = new Date(req.RequestDate);
+    if (!Number.isNaN(date.getTime())) {
+      formattedDate = date.toLocaleDateString();
+    } else if (typeof req.RequestDate === "string") {
+      formattedDate = req.RequestDate;
     }
-  } catch (error) {
-    items = [];
   }
 
   return (
@@ -31,19 +30,25 @@ export default function RequestCard({ req, onDecision }) {
             <Typography variant="overline" color="primary" sx={{ letterSpacing: 1 }}>
               Request #{req.ID}
             </Typography>
-            <Typography variant="h6">{req.Description}</Typography>
+            <Typography variant="h6">{req.Article}</Typography>
           </Box>
-          <Stack spacing={1}>
+          <Stack spacing={0.5}>
             <Typography variant="subtitle2" color="text.secondary">
-              Requested items
+              Importer
             </Typography>
-            <Stack direction="row" flexWrap="wrap" gap={1}>
-              {items.length > 0 ? (
-                items.map((item) => <Chip key={item} label={item} color="secondary" />)
-              ) : (
-                <Chip label="No items listed" variant="outlined" />
-              )}
-            </Stack>
+            <Typography variant="body1">{req.Importer}</Typography>
+          </Stack>
+          <Stack spacing={0.5}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Request date
+            </Typography>
+            <Typography variant="body1">{formattedDate}</Typography>
+          </Stack>
+          <Stack spacing={0.5}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Number of pallets
+            </Typography>
+            <Typography variant="body1">{req.PalletCount ?? "N/A"}</Typography>
           </Stack>
           <Divider sx={{ my: 1 }} />
           <Typography variant="body2" color="text.secondary">

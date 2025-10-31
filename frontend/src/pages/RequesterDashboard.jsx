@@ -1,10 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   AppBar,
   Box,
   Button,
-  Chip,
   Container,
   Paper,
   Stack,
@@ -14,32 +13,34 @@ import {
 } from "@mui/material";
 import API from "../api";
 
-export default function RequesterDashboard() {
-  const [description, setDescription] = useState("");
-  const [items, setItems] = useState("");
-  const [feedback, setFeedback] = useState(null);
+const today = () => new Date().toISOString().split("T")[0];
 
-  const selectedItems = useMemo(
-    () =>
-      items
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
-    [items]
-  );
+export default function RequesterDashboard() {
+  const [requestDate, setRequestDate] = useState(today());
+  const [importer, setImporter] = useState("");
+  const [article, setArticle] = useState("");
+  const [palletCount, setPalletCount] = useState("");
+  const [feedback, setFeedback] = useState(null);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setFeedback(null);
 
     try {
-      await API.post("/imports", { description, items: selectedItems });
+      await API.post("/imports", {
+        requestDate,
+        importer,
+        article,
+        palletCount: Number(palletCount),
+      });
       setFeedback({
         severity: "success",
         message: "Import request submitted successfully.",
       });
-      setDescription("");
-      setItems("");
+      setRequestDate(today());
+      setImporter("");
+      setArticle("");
+      setPalletCount("");
     } catch (error) {
       setFeedback({
         severity: "error",
@@ -62,7 +63,7 @@ export default function RequesterDashboard() {
               Requester workspace
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Create and track import requests for your team.
+              Register a new import request with all mandatory details.
             </Typography>
           </Box>
           <Button variant="contained" color="primary" onClick={logout}>
@@ -77,7 +78,8 @@ export default function RequesterDashboard() {
             <Stack spacing={1}>
               <Typography variant="h5">Create a new import request</Typography>
               <Typography variant="body2" color="text.secondary">
-                Provide a short description and list the items you need imported.
+                Provide the request date, importer, article and pallet count to
+                submit a complete record.
               </Typography>
             </Stack>
 
@@ -88,35 +90,39 @@ export default function RequesterDashboard() {
             <Box component="form" onSubmit={handleSubmit} noValidate>
               <Stack spacing={3}>
                 <TextField
-                  label="Description"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="e.g. Electronics for Q2 rollout"
+                  label="Request date"
+                  type="date"
+                  value={requestDate}
+                  onChange={(event) => setRequestDate(event.target.value)}
+                  InputLabelProps={{ shrink: true }}
                   required
                   fullWidth
                 />
                 <TextField
-                  label="Items"
-                  value={items}
-                  onChange={(event) => setItems(event.target.value)}
-                  placeholder="Separate items with commas"
-                  helperText="Example: monitors, docking stations, travel adapters"
+                  label="Importer"
+                  value={importer}
+                  onChange={(event) => setImporter(event.target.value)}
+                  placeholder="Importer name"
                   required
                   fullWidth
                 />
-
-                {selectedItems.length > 0 && (
-                  <Stack direction="row" flexWrap="wrap" gap={1}>
-                    {selectedItems.map((item) => (
-                      <Chip
-                        key={item}
-                        label={item}
-                        color="secondary"
-                        variant="outlined"
-                      />
-                    ))}
-                  </Stack>
-                )}
+                <TextField
+                  label="Article"
+                  value={article}
+                  onChange={(event) => setArticle(event.target.value)}
+                  placeholder="Describe the article"
+                  required
+                  fullWidth
+                />
+                <TextField
+                  label="Number of pallets"
+                  type="number"
+                  value={palletCount}
+                  onChange={(event) => setPalletCount(event.target.value)}
+                  inputProps={{ min: 0 }}
+                  required
+                  fullWidth
+                />
 
                 <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                   <Button type="submit" variant="contained" size="large">

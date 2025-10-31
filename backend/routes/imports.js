@@ -6,16 +6,39 @@ const router = express.Router();
 
 // ---------- CREATE REQUEST (Requester) ----------
 router.post("/", verifyRole(["requester"]), async (req, res) => {
-  const { description, items } = req.body;
+  const { requestDate, importer, article, palletCount } = req.body;
+
+  if (!requestDate || !importer || !article || palletCount === undefined) {
+    return res
+      .status(400)
+      .json({ message: "Missing required fields for import request." });
+  }
+
+  const parsedPalletCount = Number(palletCount);
+
+  if (!Number.isFinite(parsedPalletCount) || parsedPalletCount < 0) {
+    return res
+      .status(400)
+      .json({ message: "Pallet count must be a non-negative number." });
+  }
+
+  const requestDateValue = new Date(requestDate);
+
+  if (Number.isNaN(requestDateValue.getTime())) {
+    return res.status(400).json({ message: "Invalid request date provided." });
+  }
+
   try {
     const pool = await poolPromise;
     const result = await pool
       .request()
       .input("Requester", req.user.username)
-      .input("Description", description)
-      .input("Items", JSON.stringify(items))
-      .query(`INSERT INTO ImportRequests (Requester, Description, Items)
-              OUTPUT INSERTED.* VALUES (@Requester, @Description, @Items)`);
+      .input("RequestDate", requestDateValue.toISOString().split("T")[0])
+      .input("Importer", importer)
+      .input("Article", article)
+      .input("PalletCount", parsedPalletCount)
+      .query(`INSERT INTO ImportRequests (Requester, RequestDate, Importer, Article, PalletCount)
+              OUTPUT INSERTED.* VALUES (@Requester, @RequestDate, @Importer, @Article, @PalletCount)`);
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("Create error:", err.message);
