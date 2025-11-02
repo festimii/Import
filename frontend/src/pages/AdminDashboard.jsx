@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import {
-  AppBar,
   Box,
   Button,
   Container,
+  Grid,
+  Paper,
   Stack,
-  Toolbar,
   Typography,
 } from "@mui/material";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
+import WorkspaceHeader from "../components/WorkspaceHeader";
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
@@ -94,30 +95,57 @@ export default function AdminDashboard() {
   };
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-          <Box>
-            <Typography variant="h5" fontWeight={600} color="text.primary">
-              Admin workspace
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Track approved import requests and anticipate upcoming arrivals.
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Button variant="outlined" onClick={handleOpenUserDialog}>
-              Manage users
-            </Button>
-            <Button variant="contained" color="primary" onClick={logout}>
-              Logout
-            </Button>
-          </Stack>
-        </Toolbar>
-      </AppBar>
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", gap: 4, py: { xs: 3, md: 4 } }}>
+      <WorkspaceHeader
+        title="Admin workspace"
+        subtitle="Oversee team roles, approved imports and the shared arrival roadmap."
+        onLogout={logout}
+        showManageUsers
+        onManageUsers={handleOpenUserDialog}
+      />
 
-      <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
+      <Container sx={{ flexGrow: 1 }} maxWidth="lg">
         <Stack spacing={3}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 3,
+                  borderRadius: 4,
+                  background: "linear-gradient(140deg, rgba(27,75,145,0.08), rgba(46,184,138,0.12))",
+                  border: (theme) => `1px solid ${theme.palette.primary.main}1f`,
+                }}
+              >
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Workspace insights
+                  </Typography>
+                  <Typography variant="body1">
+                    Manage permissions and stay informed about confirmed arrivals without leaving the dashboard.
+                  </Typography>
+                </Stack>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Paper elevation={0} sx={{ p: 3, borderRadius: 4 }}>
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Team management
+                  </Typography>
+                  <Typography variant="body1">
+                    Open the management panel to adjust user roles and onboarding access instantly.
+                  </Typography>
+                  <Box>
+                    <Button variant="contained" onClick={handleOpenUserDialog}>
+                      Open user management
+                    </Button>
+                  </Box>
+                </Stack>
+              </Paper>
+            </Grid>
+          </Grid>
+
           <CalendarOverview description="Review confirmed import requests and prepare for upcoming arrivals." />
         </Stack>
       </Container>

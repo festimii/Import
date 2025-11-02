@@ -4,6 +4,7 @@ import {
   Card,
   CardActions,
   CardContent,
+  Chip,
   Divider,
   Stack,
   Typography,
@@ -36,33 +37,61 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
 
   const articleValue = formatArticleCode(req.Article);
 
+  const status = (req.Status ?? "pending").toLowerCase();
+  const statusConfig = {
+    approved: { label: "Approved", color: "success" },
+    rejected: { label: "Rejected", color: "error" },
+    pending: { label: "Pending", color: "warning" },
+  };
+  const { label, color } = statusConfig[status] ?? {
+    label: req.Status ?? "Pending",
+    color: "default",
+  };
+
   return (
-    <Card elevation={6} sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <Card
+      elevation={0}
+      sx={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background:
+          "linear-gradient(160deg, rgba(27,75,145,0.06) 0%, rgba(255,255,255,0.95) 40%, rgba(46,184,138,0.08) 100%)",
+        border: "1px solid rgba(27, 75, 145, 0.12)",
+        boxShadow:
+          "0px 18px 35px -20px rgba(27,75,145,0.45), 0px 12px 22px -18px rgba(46,184,138,0.28)",
+      }}
+    >
       <CardContent sx={{ flexGrow: 1 }}>
-        <Stack spacing={1.5}>
-          <Box>
-            <Typography variant="overline" color="primary" sx={{ letterSpacing: 1 }}>
-              Request #{req.ID}
-            </Typography>
-            <Typography variant="h6">{articleValue}</Typography>
-          </Box>
+        <Stack spacing={2}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Box>
+              <Typography variant="overline" color="primary" sx={{ letterSpacing: 1 }}>
+                Request #{req.ID}
+              </Typography>
+              <Typography variant="h6">{articleValue}</Typography>
+            </Box>
+            <Chip label={label} color={color} variant={color === "default" ? "outlined" : "filled"} />
+          </Stack>
           <Stack spacing={0.5}>
             <Typography variant="subtitle2" color="text.secondary">
               Importer
             </Typography>
             <Typography variant="body1">{req.Importer}</Typography>
           </Stack>
-          <Stack spacing={0.5}>
-            <Typography variant="subtitle2" color="text.secondary">
-              Request date
-            </Typography>
-            <Typography variant="body1">{formattedRequestDate}</Typography>
-          </Stack>
-          <Stack spacing={0.5}>
-            <Typography variant="subtitle2" color="text.secondary">
-              Arrival date (Data Arritjes)
-            </Typography>
-            <Typography variant="body1">{formattedArrivalDate}</Typography>
+          <Stack spacing={0.5} direction="row" justifyContent="space-between">
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Request date
+              </Typography>
+              <Typography variant="body1">{formattedRequestDate}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Arrival date
+              </Typography>
+              <Typography variant="body1">{formattedArrivalDate}</Typography>
+            </Box>
           </Stack>
           <Stack spacing={0.5}>
             <Typography variant="subtitle2" color="text.secondary">
@@ -70,7 +99,7 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
             </Typography>
             <Typography variant="body1">{req.PalletCount ?? "N/A"}</Typography>
           </Stack>
-          <Divider sx={{ my: 1 }} />
+          <Divider sx={{ my: 1.5 }} />
           <Typography variant="body2" color="text.secondary">
             Requested by <Typography component="span" fontWeight={600}>{req.Requester}</Typography>
           </Typography>
@@ -82,7 +111,7 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
           pb: 3,
           display: "flex",
           flexWrap: "wrap",
-          gap: 1.5,
+          gap: 1,
           justifyContent: "space-between",
           alignItems: "center",
         }}
@@ -111,6 +140,7 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
             color="secondary"
             startIcon={<CheckRoundedIcon />}
             onClick={() => onDecision(req.ID, "approved")}
+            sx={{ boxShadow: "none" }}
           >
             Approve
           </Button>

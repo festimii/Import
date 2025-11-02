@@ -111,9 +111,13 @@ const CalendarOverview = ({
 
   return (
     <Paper
-      elevation={4}
+      elevation={6}
       sx={{
         p: { xs: 3, md: 5 },
+        borderRadius: 4,
+        background: (theme) =>
+          `linear-gradient(140deg, ${theme.palette.background.paper} 60%, ${theme.palette.primary.light}0f 100%)`,
+        border: (theme) => `1px solid ${theme.palette.primary.main}14`,
         ...(sx ?? {}),
       }}
     >
@@ -149,11 +153,11 @@ const CalendarOverview = ({
               </Typography>
               <Divider sx={{ mb: 2 }} />
               {eventsForSelectedDate.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420 }}>
                   No confirmed arrivals scheduled for this day.
                 </Typography>
               ) : (
-                <List dense>
+                <List dense sx={{ borderRadius: 3, backgroundColor: "rgba(27,75,145,0.04)" }}>
                   {eventsForSelectedDate.map((request) => (
                     <ListItem key={request.ID} alignItems="flex-start">
                       <ListItemText
