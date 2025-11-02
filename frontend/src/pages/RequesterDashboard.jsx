@@ -1,19 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  AppBar,
   Box,
   Button,
   Container,
+  Grid,
   Paper,
   Stack,
   TextField,
-  Toolbar,
   Typography,
 } from "@mui/material";
+import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
+import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
+import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
 import API from "../api";
 import formatArticleCode from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
+import PageHero from "../components/PageHero";
+import StatCard from "../components/StatCard";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -102,26 +106,75 @@ export default function RequesterDashboard() {
     window.location.reload();
   };
 
+  const upcomingArrival = useMemo(() => {
+    if (!arrivalDate) return "Select a date";
+    return new Date(arrivalDate).toLocaleDateString();
+  }, [arrivalDate]);
+
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
-          <Box>
-            <Typography variant="h5" fontWeight={600} color="text.primary">
-              Requester workspace
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Register a new import request with all mandatory details.
-            </Typography>
-          </Box>
-          <Button variant="contained" color="primary" onClick={logout}>
+      <PageHero
+        title="Requester workspace"
+        subtitle="Register new import requests with every required detail and keep tabs on confirmations in real time."
+        actions={
+          <Button variant="contained" color="secondary" onClick={logout}>
             Logout
           </Button>
-        </Toolbar>
-      </AppBar>
+        }
+      >
+        <Paper
+          elevation={0}
+          sx={{
+            p: 3,
+            color: "inherit",
+            backgroundColor: "rgba(255,255,255,0.14)",
+            borderRadius: 3,
+            border: "1px solid rgba(255,255,255,0.25)",
+          }}
+        >
+          <Stack spacing={1}>
+            <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
+              Today's focus
+            </Typography>
+            <Typography variant="body1">
+              Submit the latest import details, then monitor responses from approvers in
+              your notifications feed below.
+            </Typography>
+          </Stack>
+        </Paper>
+      </PageHero>
 
-      <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="md">
-        <Stack spacing={3}>
+      <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
+        <Stack spacing={4}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<NotificationsActiveRoundedIcon />}
+                label="Unread updates"
+                value={notificationsLoading ? "…" : notifications.length}
+                trend="Dismiss updates as you review them"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<EventAvailableRoundedIcon />}
+                label="Planned arrival"
+                value={upcomingArrival}
+                trend="Pick your best estimate to help confirmers plan"
+                color="secondary"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<ChecklistRoundedIcon />}
+                label="Today’s date"
+                value={new Date(currentDate).toLocaleDateString()}
+                trend="Request date is set automatically"
+                color="info"
+              />
+            </Grid>
+          </Grid>
+
           <Stack spacing={2}>
             {notificationsFeedback && (
               <Alert severity={notificationsFeedback.severity}>
@@ -145,13 +198,20 @@ export default function RequesterDashboard() {
             )}
           </Stack>
 
-          <Paper elevation={8} sx={{ p: { xs: 4, md: 6 } }}>
+          <Paper
+            elevation={12}
+            sx={{
+              p: { xs: 4, md: 6 },
+              background: (theme) =>
+                `linear-gradient(160deg, ${theme.palette.common.white} 0%, ${theme.palette.background.default} 100%)`,
+            }}
+          >
             <Stack spacing={4}>
               <Stack spacing={1}>
                 <Typography variant="h5">Create a new import request</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Provide the request date, importer, article and pallet count to
-                  submit a complete record.
+                  Provide the request date, importer, article and pallet count to submit a
+                  complete record.
                 </Typography>
               </Stack>
 

@@ -4,13 +4,15 @@ import {
   Alert,
   Box,
   Button,
-  Container,
+  IconButton,
+  InputAdornment,
   Link,
-  Paper,
   Stack,
   TextField,
-  Typography,
 } from "@mui/material";
+import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
+import VisibilityOffRoundedIcon from "@mui/icons-material/VisibilityOffRounded";
+import AuthLayout from "../components/AuthLayout";
 import API from "../api";
 
 export default function Register() {
@@ -18,6 +20,8 @@ export default function Register() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [feedback, setFeedback] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleRegister = async (event) => {
     event.preventDefault();
@@ -46,82 +50,81 @@ export default function Register() {
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        py: { xs: 6, md: 10 },
-        px: 2,
-      }}
+    <AuthLayout
+      title="Create your account"
+      subtitle="Set up secure access so you can request imports and collaborate with your confirmation team."
+      accent="Team onboarding"
+      footer={
+        <Stack spacing={1} textAlign="center">
+          <Link component={RouterLink} to="/" underline="hover">
+            Already have an account? Sign in
+          </Link>
+        </Stack>
+      }
     >
-      <Container maxWidth="sm">
-        <Paper
-          elevation={10}
-          sx={{
-            p: { xs: 4, md: 6 },
-            backdropFilter: "blur(18px)",
-            backgroundColor: (theme) => theme.palette.background.paper,
-          }}
-        >
-          <Stack spacing={4}>
-            <Stack spacing={1}>
-              <Typography variant="h4" component="h1">
-                Create your account
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                Set up access for managing and confirming import requests.
-              </Typography>
-            </Stack>
+      <Box component="form" onSubmit={handleRegister} noValidate>
+        <Stack spacing={3}>
+          {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
 
-            {feedback && (
-              <Alert severity={feedback.severity}>{feedback.message}</Alert>
-            )}
+          <TextField
+            label="Username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+            required
+            fullWidth
+          />
+          <TextField
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="new-password"
+            required
+            fullWidth
+            helperText="Use at least 8 characters with numbers or symbols"
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    edge="end"
+                  >
+                    {showPassword ? <VisibilityOffRoundedIcon /> : <VisibilityRoundedIcon />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+          <TextField
+            label="Confirm password"
+            type={showConfirm ? "text" : "password"}
+            value={confirm}
+            onChange={(event) => setConfirm(event.target.value)}
+            autoComplete="new-password"
+            required
+            fullWidth
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label={showConfirm ? "Hide password" : "Show password"}
+                    onClick={() => setShowConfirm((prev) => !prev)}
+                    edge="end"
+                  >
+                    {showConfirm ? <VisibilityOffRoundedIcon /> : <VisibilityRoundedIcon />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
 
-            <Box component="form" onSubmit={handleRegister} noValidate>
-              <Stack spacing={3}>
-                <TextField
-                  label="Username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  autoComplete="username"
-                  required
-                  fullWidth
-                />
-                <TextField
-                  label="Password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="new-password"
-                  required
-                  fullWidth
-                />
-                <TextField
-                  label="Confirm password"
-                  type="password"
-                  value={confirm}
-                  onChange={(event) => setConfirm(event.target.value)}
-                  autoComplete="new-password"
-                  required
-                  fullWidth
-                />
-                <Button type="submit" variant="contained" size="large">
-                  Register
-                </Button>
-              </Stack>
-            </Box>
-
-            <Typography variant="body2" textAlign="center">
-              Already have an account?{" "}
-              <Link component={RouterLink} to="/" underline="hover">
-                Sign in here
-              </Link>
-            </Typography>
-          </Stack>
-        </Paper>
-      </Container>
-    </Box>
+          <Button type="submit" variant="contained" size="large">
+            Register
+          </Button>
+        </Stack>
+      </Box>
+    </AuthLayout>
   );
 }

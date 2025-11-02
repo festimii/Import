@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  AppBar,
   Box,
   Button,
   CircularProgress,
@@ -14,12 +13,16 @@ import {
   Paper,
   Stack,
   TextField,
-  Toolbar,
   Typography,
 } from "@mui/material";
+import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
+import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
+import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import API from "../api";
 import RequestCard from "../components/RequestCard";
 import CalendarOverview from "../components/CalendarOverview";
+import PageHero from "../components/PageHero";
+import StatCard from "../components/StatCard";
 
 export default function ConfirmerDashboard() {
   const [requests, setRequests] = useState([]);
@@ -108,9 +111,7 @@ export default function ConfirmerDashboard() {
       });
       setFeedback({
         severity: "success",
-        message: `Arrival date updated. ${
-          proposingRequest.Requester ?? "The requester"
-        } has been notified.`,
+        message: `${proposingRequest.Requester ?? "The requester"} has been notified about the new arrival date.`,
       });
       shouldClose = true;
     } catch (error) {
@@ -132,27 +133,90 @@ export default function ConfirmerDashboard() {
     window.location.reload();
   };
 
+  const pendingCount = requests.length;
+  const averagePallets = useMemo(() => {
+    if (pendingCount === 0) return "—";
+    const total = requests.reduce((sum, request) => {
+      const count = Number(request.PalletCount);
+      return sum + (Number.isFinite(count) ? count : 0);
+    }, 0);
+    const average = total / pendingCount;
+    if (!Number.isFinite(average) || average === 0) {
+      return "—";
+    }
+    return `${Math.round(average)} pallets`;
+  }, [pendingCount, requests]);
+
+  const awaitingSchedule = useMemo(
+    () => requests.filter((request) => !request.ArrivalDate).length,
+    [requests]
+  );
+
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
-          <Box>
-            <Typography variant="h5" fontWeight={600} color="text.primary">
-              Confirmer workspace
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Review pending import requests and keep the process moving.
-            </Typography>
-          </Box>
-          <Button variant="contained" color="primary" onClick={logout}>
+      <PageHero
+        title="Confirmer workspace"
+        subtitle="Review pending import requests, confirm arrivals and keep the calendar accurate for every stakeholder."
+        actions={
+          <Button variant="contained" color="secondary" onClick={logout}>
             Logout
           </Button>
-        </Toolbar>
-      </AppBar>
+        }
+      >
+        <Paper
+          elevation={0}
+          sx={{
+            p: 3,
+            color: "inherit",
+            backgroundColor: "rgba(255,255,255,0.14)",
+            borderRadius: 3,
+            border: "1px solid rgba(255,255,255,0.25)",
+          }}
+        >
+          <Stack spacing={1}>
+            <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
+              Daily reminder
+            </Typography>
+            <Typography variant="body1">
+              Prioritize requests with upcoming arrivals and communicate any schedule
+              changes promptly.
+            </Typography>
+          </Stack>
+        </Paper>
+      </PageHero>
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
-        <Stack spacing={3}>
+        <Stack spacing={4}>
           {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<AssignmentTurnedInRoundedIcon />}
+                label="Pending decisions"
+                value={loading ? "…" : pendingCount}
+                trend="Approve or reject requests to keep freight moving"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<Inventory2RoundedIcon />}
+                label="Average load"
+                value={loading ? "…" : averagePallets}
+                trend="Helps plan capacity with logistics"
+                color="secondary"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<ScheduleRoundedIcon />}
+                label="Awaiting schedule"
+                value={loading ? "…" : awaitingSchedule}
+                trend="Propose a new arrival date when necessary"
+                color="info"
+              />
+            </Grid>
+          </Grid>
 
           {loading ? (
             <Paper
@@ -229,7 +293,7 @@ export default function ConfirmerDashboard() {
             />
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ px: 3, py: 2.5 }}>
           <Button onClick={handleCloseProposal} disabled={proposalSubmitting}>
             Cancel
           </Button>
