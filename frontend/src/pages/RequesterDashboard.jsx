@@ -1,20 +1,19 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  AppBar,
   Box,
   Button,
-  Chip,
   Container,
-  Grid,
   Paper,
   Stack,
   TextField,
+  Toolbar,
   Typography,
 } from "@mui/material";
 import API from "../api";
 import formatArticleCode from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
-import WorkspaceHeader from "../components/WorkspaceHeader";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -103,165 +102,124 @@ export default function RequesterDashboard() {
     window.location.reload();
   };
 
-  const pendingNotifications = notifications.length;
-
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", gap: 4, py: { xs: 3, md: 4 } }}>
-      <WorkspaceHeader
-        title="Requester workspace"
-        subtitle="Submit detailed import requests and stay aligned with confirmation updates."
-        onLogout={logout}
-      />
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
+        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
+          <Box>
+            <Typography variant="h5" fontWeight={600} color="text.primary">
+              Requester workspace
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Register a new import request with all mandatory details.
+            </Typography>
+          </Box>
+          <Button variant="contained" color="primary" onClick={logout}>
+            Logout
+          </Button>
+        </Toolbar>
+      </AppBar>
 
-      <Container sx={{ flexGrow: 1 }} maxWidth="lg">
+      <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="md">
         <Stack spacing={3}>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
-              <Paper
-                elevation={0}
-                sx={{
-                  p: 3,
-                  height: "100%",
-                  borderRadius: 4,
-                  background: "linear-gradient(140deg, rgba(27,75,145,0.08), rgba(46,184,138,0.12))",
-                  border: (theme) => `1px solid ${theme.palette.primary.main}1f`,
-                }}
-              >
-                <Stack spacing={2}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Today's status
-                  </Typography>
-                  <Typography variant="h4" component="p">
-                    {pendingNotifications}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {pendingNotifications === 0
-                      ? "You're all caught up with the latest confirmations."
-                      : "Pending notifications awaiting your review."}
-                  </Typography>
-                  <Chip
-                    label={`Requests sent ${currentDate}`}
-                    sx={{
-                      alignSelf: "flex-start",
-                      backgroundColor: "rgba(27,75,145,0.1)",
-                      color: "primary.main",
-                      fontWeight: 600,
-                    }}
+          <Stack spacing={2}>
+            {notificationsFeedback && (
+              <Alert severity={notificationsFeedback.severity}>
+                {notificationsFeedback.message}
+              </Alert>
+            )}
+            {notificationsLoading ? (
+              <Alert severity="info">Checking for updates…</Alert>
+            ) : notifications.length === 0 ? (
+              <Alert severity="success">You're up to date with the latest changes.</Alert>
+            ) : (
+              notifications.map((notification) => (
+                <Alert
+                  key={notification.ID}
+                  severity="info"
+                  onClose={() => handleNotificationDismiss(notification.ID)}
+                >
+                  {notification.Message}
+                </Alert>
+              ))
+            )}
+          </Stack>
+
+          <Paper elevation={8} sx={{ p: { xs: 4, md: 6 } }}>
+            <Stack spacing={4}>
+              <Stack spacing={1}>
+                <Typography variant="h5">Create a new import request</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Provide the request date, importer, article and pallet count to
+                  submit a complete record.
+                </Typography>
+              </Stack>
+
+              {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+
+              <Box component="form" onSubmit={handleSubmit} noValidate>
+                <Stack spacing={3}>
+                  <TextField
+                    label="Request date"
+                    type="date"
+                    value={currentDate}
+                    disabled
+                    InputLabelProps={{ shrink: true }}
+                    helperText="Automatically set to today's date"
+                    required
+                    fullWidth
                   />
-                </Stack>
-              </Paper>
-            </Grid>
-            <Grid item xs={12} md={8}>
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 4 }}>
-                <Stack spacing={2}>
-                  <Typography variant="subtitle1" fontWeight={600}>
-                    Notifications
-                  </Typography>
-                  {notificationsFeedback && (
-                    <Alert severity={notificationsFeedback.severity}>
-                      {notificationsFeedback.message}
-                    </Alert>
-                  )}
-                  {notificationsLoading ? (
-                    <Alert severity="info">Checking for updates…</Alert>
-                  ) : notifications.length === 0 ? (
-                    <Alert severity="success">
-                      You're up to date with the latest changes.
-                    </Alert>
-                  ) : (
-                    <Stack spacing={2}>
-                      {notifications.map((notification) => (
-                        <Alert
-                          key={notification.ID}
-                          severity="info"
-                          onClose={() => handleNotificationDismiss(notification.ID)}
-                        >
-                          {notification.Message}
-                        </Alert>
-                      ))}
-                    </Stack>
-                  )}
-                </Stack>
-              </Paper>
-            </Grid>
-          </Grid>
+                  <TextField
+                    label="Importer"
+                    value={importer}
+                    onChange={(event) => setImporter(event.target.value)}
+                    placeholder="Importer name"
+                    required
+                    fullWidth
+                  />
+                  <TextField
+                    label="Article"
+                    value={article}
+                    onChange={(event) => setArticle(event.target.value)}
+                    placeholder="Describe the article"
+                    helperText="Article codes shorter than 6 digits are padded automatically"
+                    required
+                    fullWidth
+                  />
+                  <TextField
+                    label="Arrival date (Data Arritjes)"
+                    type="date"
+                    value={arrivalDate}
+                    onChange={(event) => setArrivalDate(event.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    helperText="Choose when the import is expected to arrive"
+                    required
+                    fullWidth
+                  />
+                  <TextField
+                    label="Number of pallets"
+                    type="number"
+                    value={palletCount}
+                    onChange={(event) => setPalletCount(event.target.value)}
+                    inputProps={{ min: 0 }}
+                    required
+                    fullWidth
+                  />
 
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={5}>
-              <Paper elevation={8} sx={{ p: { xs: 4, md: 5 }, borderRadius: 4 }}>
-                <Stack spacing={4}>
-                  <Stack spacing={1}>
-                    <Typography variant="h5">Create a new import request</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Provide the importer, article and arrival details to notify the confirmation team.
-                    </Typography>
-                  </Stack>
-
-                  {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
-
-                  <Stack component="form" onSubmit={handleSubmit} noValidate spacing={3}>
-                    <TextField
-                      label="Request date"
-                      type="date"
-                      value={currentDate}
-                      disabled
-                      InputLabelProps={{ shrink: true }}
-                      helperText="Automatically set to today's date"
-                      required
-                      fullWidth
-                    />
-                    <TextField
-                      label="Importer"
-                      value={importer}
-                      onChange={(event) => setImporter(event.target.value)}
-                      placeholder="Importer name"
-                      required
-                      fullWidth
-                    />
-                    <TextField
-                      label="Article"
-                      value={article}
-                      onChange={(event) => setArticle(event.target.value)}
-                      placeholder="Describe the article"
-                      helperText="Article codes shorter than 6 digits are padded automatically"
-                      required
-                      fullWidth
-                    />
-                    <TextField
-                      label="Arrival date (Data Arritjes)"
-                      type="date"
-                      value={arrivalDate}
-                      onChange={(event) => setArrivalDate(event.target.value)}
-                      InputLabelProps={{ shrink: true }}
-                      helperText="Choose when the import is expected to arrive"
-                      required
-                      fullWidth
-                    />
-                    <TextField
-                      label="Number of pallets"
-                      type="number"
-                      value={palletCount}
-                      onChange={(event) => setPalletCount(event.target.value)}
-                      inputProps={{ min: 0 }}
-                      required
-                      fullWidth
-                    />
-
+                  <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                     <Button type="submit" variant="contained" size="large">
                       Submit request
                     </Button>
-                  </Stack>
+                  </Box>
                 </Stack>
-              </Paper>
-            </Grid>
-            <Grid item xs={12} md={7}>
-              <CalendarOverview
-                title="Arrival schedule"
-                description="Browse the confirmed arrival calendar to align logistics and storage planning."
-                sx={{ height: "100%" }}
-              />
-            </Grid>
-          </Grid>
+              </Box>
+            </Stack>
+          </Paper>
+
+          <CalendarOverview
+            title="Arrival schedule"
+            description="Browse the shared calendar of confirmed arrivals to stay informed about planned deliveries."
+          />
         </Stack>
       </Container>
     </Box>
