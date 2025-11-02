@@ -25,7 +25,14 @@ const mapArticles = (records) =>
   }));
 
 router.post("/", verifyRole(["requester"]), async (req, res) => {
-  const { requestDate, arrivalDate, importer, article, palletCount } = req.body;
+  const {
+    requestDate,
+    arrivalDate,
+    importer,
+    article,
+    palletCount,
+    comment,
+  } = req.body;
 
   if (!importer || !article || palletCount === undefined || !arrivalDate) {
     return res
@@ -42,6 +49,19 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
   }
 
   try {
+    const sanitizedComment = (() => {
+      if (comment === null || comment === undefined) {
+        return null;
+      }
+
+      const stringValue = String(comment).trim();
+      if (stringValue.length === 0) {
+        return null;
+      }
+
+      return stringValue.slice(0, 1000);
+    })();
+
     const requestDateValue = (() => {
       if (!requestDate) return new Date();
 
@@ -73,19 +93,21 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
       .input("Importuesi", importer)
       .input("Artikulli", normalizedArticle)
       .input("NumriPaletave", parsedPalletCount)
+      .input("Comment", sanitizedComment)
       .input("Useri", req.user.username)
-      .query(`INSERT INTO ImportRequests (DataKerkeses, DataArritjes, Importuesi, Artikulli, NumriPaletave, Useri)
+      .query(`INSERT INTO ImportRequests (DataKerkeses, DataArritjes, Importuesi, Artikulli, NumriPaletave, Useri, Comment)
               OUTPUT INSERTED.ID,
                      INSERTED.DataKerkeses AS RequestDate,
                      INSERTED.DataArritjes AS ArrivalDate,
                      INSERTED.Importuesi AS Importer,
                      INSERTED.Artikulli AS Article,
                      INSERTED.NumriPaletave AS PalletCount,
+                     INSERTED.Comment,
                      INSERTED.Useri AS Requester,
                      INSERTED.Status,
                      INSERTED.ConfirmedBy,
                      INSERTED.CreatedAt
-              VALUES (@DataKerkeses, @DataArritjes, @Importuesi, @Artikulli, @NumriPaletave, @Useri)`);
+              VALUES (@DataKerkeses, @DataArritjes, @Importuesi, @Artikulli, @NumriPaletave, @Useri, @Comment)`);
     const [record] = mapArticles(result.recordset);
     res.json(record);
   } catch (err) {
@@ -112,6 +134,7 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
                      Importuesi AS Importer,
                      Artikulli AS Article,
                      NumriPaletave AS PalletCount,
+                     Comment,
                      Useri AS Requester,
                      Status,
                      ConfirmedBy,
@@ -141,6 +164,7 @@ router.get(
                      Importuesi AS Importer,
                      Artikulli AS Article,
                      NumriPaletave AS PalletCount,
+                     Comment,
                      Useri AS Requester,
                      Status,
                      ConfirmedBy,
@@ -148,12 +172,85 @@ router.get(
               FROM ImportRequests
               WHERE Status = 'approved'
               ORDER BY DataArritjes ASC, CreatedAt DESC`);
-    res.json(mapArticles(result.recordset));
-  } catch (err) {
-    console.error("Fetch approved error:", err.message);
-    res.status(500).json({ message: "Server error" });
+      res.json(mapArticles(result.recordset));
+    } catch (err) {
+      console.error("Fetch approved error:", err.message);
+      res.status(500).json({ message: "Server error" });
+    }
   }
-});
+);
+
+router.get(
+  "/metrics",
+  verifyRole(["admin", "confirmer", "requester"]),
+  async (req, res) => {
+    try {
+      const pool = await poolPromise;
+
+      const summaryResult = await pool
+        .request()
+        .query(`SELECT COUNT(*) AS TotalRequests,
+                       SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) AS PendingCount,
+                       SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+                       SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+                       SUM(CAST(NumriPaletave AS INT)) AS TotalPallets
+                FROM ImportRequests`);
+
+      const summary = summaryResult.recordset[0] ?? {};
+
+      const totalRequests = Number(summary.TotalRequests ?? 0);
+      const pendingCount = Number(summary.PendingCount ?? 0);
+      const approvedCount = Number(summary.ApprovedCount ?? 0);
+      const rejectedCount = Number(summary.RejectedCount ?? 0);
+      const totalPalletsRaw = Number(summary.TotalPallets ?? 0);
+      const totalPallets = Number.isFinite(totalPalletsRaw) ? totalPalletsRaw : 0;
+      const averagePallets =
+        totalRequests > 0 && totalPallets > 0
+          ? Math.round((totalPallets / totalRequests) * 10) / 10
+          : 0;
+
+      const upcomingResult = await pool
+        .request()
+        .query(`SELECT COUNT(*) AS UpcomingWeek
+                FROM ImportRequests
+                WHERE Status = 'approved'
+                  AND DataArritjes IS NOT NULL
+                  AND CAST(DataArritjes AS DATE) >= CAST(GETDATE() AS DATE)
+                  AND CAST(DataArritjes AS DATE) < DATEADD(day, 7, CAST(GETDATE() AS DATE))`);
+
+      const upcomingWeek = Number(upcomingResult.recordset?.[0]?.UpcomingWeek ?? 0);
+
+      const monthlyResult = await pool
+        .request()
+        .query(`SELECT FORMAT(DataKerkeses, 'yyyy-MM') AS Month,
+                       COUNT(*) AS RequestCount,
+                       SUM(CAST(NumriPaletave AS INT)) AS PalletTotal
+                FROM ImportRequests
+                GROUP BY FORMAT(DataKerkeses, 'yyyy-MM')
+                ORDER BY Month ASC`);
+
+      const monthlyRequests = monthlyResult.recordset.map((row) => ({
+        month: row.Month,
+        requestCount: Number(row.RequestCount ?? 0),
+        palletTotal: Number(row.PalletTotal ?? 0),
+      }));
+
+      res.json({
+        totalRequests,
+        pendingCount,
+        approvedCount,
+        rejectedCount,
+        totalPallets,
+        averagePallets,
+        upcomingWeek,
+        monthlyRequests,
+      });
+    } catch (err) {
+      console.error("Metrics fetch error:", err.message);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 // ---------- APPROVE/REJECT REQUEST ----------
 router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
@@ -223,6 +320,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                    INSERTED.Importuesi AS Importer,
                    INSERTED.Artikulli AS Article,
                    INSERTED.NumriPaletave AS PalletCount,
+                   INSERTED.Comment,
                    INSERTED.Useri AS Requester,
                    INSERTED.Status,
                    INSERTED.ConfirmedBy,
