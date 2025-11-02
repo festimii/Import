@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
-  AppBar,
   Box,
   Button,
   CircularProgress,
@@ -14,12 +13,12 @@ import {
   Paper,
   Stack,
   TextField,
-  Toolbar,
   Typography,
 } from "@mui/material";
 import API from "../api";
 import RequestCard from "../components/RequestCard";
 import CalendarOverview from "../components/CalendarOverview";
+import WorkspaceHeader from "../components/WorkspaceHeader";
 
 export default function ConfirmerDashboard() {
   const [requests, setRequests] = useState([]);
@@ -132,27 +131,48 @@ export default function ConfirmerDashboard() {
     window.location.reload();
   };
 
-  return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
-          <Box>
-            <Typography variant="h5" fontWeight={600} color="text.primary">
-              Confirmer workspace
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Review pending import requests and keep the process moving.
-            </Typography>
-          </Box>
-          <Button variant="contained" color="primary" onClick={logout}>
-            Logout
-          </Button>
-        </Toolbar>
-      </AppBar>
+  const pendingRequests = requests.filter((request) => request.Status === "pending" || !request.Status).length;
 
-      <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
+  return (
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", gap: 4, py: { xs: 3, md: 4 } }}>
+      <WorkspaceHeader
+        title="Confirmer workspace"
+        subtitle="Review new import requests, coordinate arrival schedules and keep the pipeline moving."
+        onLogout={logout}
+      />
+
+      <Container sx={{ flexGrow: 1 }} maxWidth="lg">
         <Stack spacing={3}>
-          {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 3,
+                  borderRadius: 4,
+                  background: "linear-gradient(150deg, rgba(27,75,145,0.08), rgba(46,184,138,0.14))",
+                  border: (theme) => `1px solid ${theme.palette.secondary.main}1f`,
+                }}
+              >
+                <Stack spacing={2}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Pending decisions
+                  </Typography>
+                  <Typography variant="h4" component="p">
+                    {pendingRequests}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {pendingRequests === 0
+                      ? "All requests are up to date."
+                      : "Requests awaiting approval or a new arrival proposal."}
+                  </Typography>
+                </Stack>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} md={8}>
+              {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+            </Grid>
+          </Grid>
 
           {loading ? (
             <Paper
@@ -168,13 +188,12 @@ export default function ConfirmerDashboard() {
               <CircularProgress color="primary" />
             </Paper>
           ) : requests.length === 0 ? (
-            <Paper elevation={4} sx={{ p: { xs: 4, md: 6 }, textAlign: "center" }}>
+            <Paper elevation={4} sx={{ p: { xs: 4, md: 6 }, textAlign: "center", borderRadius: 4 }}>
               <Typography variant="h6" gutterBottom>
                 You're all caught up
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                There are no pending requests right now. You'll be notified when new
-                submissions arrive.
+                There are no pending requests right now. You'll be notified when new submissions arrive.
               </Typography>
             </Paper>
           ) : (
