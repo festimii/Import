@@ -4,19 +4,25 @@ import {
   Alert,
   Box,
   Button,
-  Container,
+  FormControlLabel,
+  IconButton,
+  InputAdornment,
   Link,
-  Paper,
   Stack,
+  Switch,
   TextField,
-  Typography,
 } from "@mui/material";
+import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
+import VisibilityOffRoundedIcon from "@mui/icons-material/VisibilityOffRounded";
+import AuthLayout from "../components/AuthLayout";
 import API from "../api";
 
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [staySignedIn, setStaySignedIn] = useState(true);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -25,6 +31,11 @@ export default function Login() {
       const res = await API.post("/auth/login", { username, password });
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("role", res.data.role);
+      if (staySignedIn) {
+        localStorage.setItem("remember", "true");
+      } else {
+        localStorage.removeItem("remember");
+      }
       window.location.href = "/";
     } catch {
       setError("We couldn't find a match for that username and password.");
@@ -32,71 +43,71 @@ export default function Login() {
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        py: { xs: 6, md: 10 },
-        px: 2,
-      }}
+    <AuthLayout
+      title="Welcome back"
+      subtitle="Sign in to manage import requests, collaborate with approvers and keep deliveries on track."
+      footer={
+        <Stack spacing={1} textAlign="center">
+          <Link component={RouterLink} to="/register" underline="hover">
+            Create a new account
+          </Link>
+          <Link underline="hover" color="text.secondary" sx={{ cursor: "pointer" }}>
+            Forgot your password?
+          </Link>
+        </Stack>
+      }
     >
-      <Container maxWidth="sm">
-        <Paper
-          elevation={10}
-          sx={{
-            p: { xs: 4, md: 6 },
-            backdropFilter: "blur(18px)",
-            backgroundColor: (theme) => theme.palette.background.paper,
-          }}
-        >
-          <Stack spacing={4}>
-            <Stack spacing={1}>
-              <Typography variant="h4" component="h1">
-                Welcome back
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                Sign in to manage your import requests and approvals.
-              </Typography>
-            </Stack>
+      <Box component="form" onSubmit={handleLogin} noValidate>
+        <Stack spacing={3}>
+          {error && <Alert severity="error">{error}</Alert>}
 
-            {error && <Alert severity="error">{error}</Alert>}
+          <TextField
+            label="Username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+            required
+            fullWidth
+          />
+          <TextField
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            required
+            fullWidth
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    edge="end"
+                  >
+                    {showPassword ? <VisibilityOffRoundedIcon /> : <VisibilityRoundedIcon />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
 
-            <Box component="form" onSubmit={handleLogin} noValidate>
-              <Stack spacing={3}>
-                <TextField
-                  label="Username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  autoComplete="username"
-                  required
-                  fullWidth
-                />
-                <TextField
-                  label="Password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  required
-                  fullWidth
-                />
-                <Button type="submit" variant="contained" size="large">
-                  Sign in
-                </Button>
-              </Stack>
-            </Box>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={staySignedIn}
+                onChange={(event) => setStaySignedIn(event.target.checked)}
+                color="primary"
+              />
+            }
+            label="Keep me signed in on this device"
+          />
 
-            <Typography variant="body2" textAlign="center">
-              New to the platform?{" "}
-              <Link component={RouterLink} to="/register" underline="hover">
-                Create an account
-              </Link>
-            </Typography>
-          </Stack>
-        </Paper>
-      </Container>
-    </Box>
+          <Button type="submit" variant="contained" size="large">
+            Sign in
+          </Button>
+        </Stack>
+      </Box>
+    </AuthLayout>
   );
 }

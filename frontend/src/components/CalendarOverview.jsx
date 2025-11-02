@@ -16,6 +16,7 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { DateCalendar } from "@mui/x-date-pickers/DateCalendar";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { PickersDay } from "@mui/x-date-pickers/PickersDay";
+import { alpha } from "@mui/material/styles";
 import { format } from "date-fns";
 import API from "../api";
 import formatArticleCode from "../utils/formatArticle";
@@ -89,7 +90,7 @@ const CalendarOverview = ({
   }, [selectedDate]);
 
   const renderDay = (dayProps) => {
-    const { day } = dayProps;
+    const { day, selectedDay, outsideCurrentMonth } = dayProps;
     if (!(day instanceof Date) || Number.isNaN(day.getTime())) {
       return <PickersDay {...dayProps} />;
     }
@@ -103,17 +104,36 @@ const CalendarOverview = ({
         overlap="circular"
         color="secondary"
         badgeContent={showBadge ? events.length : undefined}
+        sx={{
+          "& .MuiBadge-badge": {
+            fontSize: 12,
+            height: 22,
+            minWidth: 22,
+          },
+        }}
       >
-        <PickersDay {...dayProps} />
+        <PickersDay
+          {...dayProps}
+          selected={selectedDay}
+          outsideCurrentMonth={outsideCurrentMonth}
+          sx={{
+            borderRadius: "14px",
+            border: showBadge ? (theme) => `1px solid ${alpha(theme.palette.secondary.main, 0.4)}` : undefined,
+          }}
+        />
       </Badge>
     );
   };
 
   return (
     <Paper
-      elevation={4}
+      elevation={12}
       sx={{
         p: { xs: 3, md: 5 },
+        borderRadius: 4,
+        background: (theme) =>
+          `linear-gradient(160deg, ${theme.palette.background.paper} 0%, ${alpha(theme.palette.primary.main, 0.06)} 100%)`,
+        border: (theme) => `1px solid ${alpha(theme.palette.primary.main, 0.08)}`,
         ...(sx ?? {}),
       }}
     >
@@ -134,12 +154,22 @@ const CalendarOverview = ({
             <CircularProgress color="primary" />
           </Box>
         ) : (
-          <Stack direction={{ xs: "column", md: "row" }} spacing={4}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={4} alignItems="stretch">
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DateCalendar
                 value={selectedDate}
                 onChange={(value) => value && setSelectedDate(value)}
                 slots={{ day: renderDay }}
+                sx={{
+                  borderRadius: 4,
+                  p: 2,
+                  "& .MuiPickersCalendarHeader-label": {
+                    fontWeight: 600,
+                  },
+                  "& .MuiDayCalendar-weekDayLabel": {
+                    fontWeight: 500,
+                  },
+                }}
               />
             </LocalizationProvider>
 
@@ -153,9 +183,18 @@ const CalendarOverview = ({
                   No confirmed arrivals scheduled for this day.
                 </Typography>
               ) : (
-                <List dense>
+                <List dense sx={{ p: 0 }}>
                   {eventsForSelectedDate.map((request) => (
-                    <ListItem key={request.ID} alignItems="flex-start">
+                    <ListItem
+                      key={request.ID}
+                      alignItems="flex-start"
+                      sx={{
+                        borderRadius: 3,
+                        mb: 1.5,
+                        backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.04),
+                        border: (theme) => `1px solid ${alpha(theme.palette.primary.main, 0.08)}`,
+                      }}
+                    >
                       <ListItemText
                         primary={`${request.Importer} · ${formatArticleCode(request.Article)}`}
                         secondary={(() => {

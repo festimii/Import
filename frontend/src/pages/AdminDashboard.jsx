@@ -1,16 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  AppBar,
   Box,
   Button,
   Container,
+  Grid,
   Stack,
-  Toolbar,
   Typography,
 } from "@mui/material";
+import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
+import VerifiedUserRoundedIcon from "@mui/icons-material/VerifiedUserRounded";
+import EventBusyRoundedIcon from "@mui/icons-material/EventBusyRounded";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
+import PageHero from "../components/PageHero";
+import StatCard from "../components/StatCard";
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
@@ -34,6 +38,10 @@ export default function AdminDashboard() {
       setUsersLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
 
   useEffect(() => {
     if (isUserDialogOpen) {
@@ -93,31 +101,82 @@ export default function AdminDashboard() {
     setUserFeedback(null);
   };
 
+  const { totalUsers, confirmerCount, requesterCount } = useMemo(() => {
+    const total = users.length;
+    const counts = users.reduce(
+      (acc, user) => {
+        if (user.Role === "confirmer") acc.confirmer += 1;
+        if (user.Role === "requester") acc.requester += 1;
+        return acc;
+      },
+      { confirmer: 0, requester: 0 }
+    );
+
+    return {
+      totalUsers: total,
+      confirmerCount: counts.confirmer,
+      requesterCount: counts.requester,
+    };
+  }, [users]);
+
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="static" color="transparent" elevation={0} sx={{ py: 1 }}>
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-          <Box>
-            <Typography variant="h5" fontWeight={600} color="text.primary">
-              Admin workspace
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Track approved import requests and anticipate upcoming arrivals.
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Button variant="outlined" onClick={handleOpenUserDialog}>
+      <PageHero
+        title="Admin workspace"
+        subtitle="Track approved import requests, anticipate arrivals and curate role-based access for every collaborator."
+        actions={
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+            <Button variant="outlined" color="inherit" onClick={handleOpenUserDialog}>
               Manage users
             </Button>
-            <Button variant="contained" color="primary" onClick={logout}>
+            <Button variant="contained" color="secondary" onClick={logout}>
               Logout
             </Button>
           </Stack>
-        </Toolbar>
-      </AppBar>
+        }
+      >
+        <Stack spacing={1.5} sx={{ color: "inherit" }}>
+          <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
+            Governance snapshot
+          </Typography>
+          <Typography variant="body1">
+            Keep access aligned with responsibilities and consult the shared arrival
+            calendar to inform stakeholders.
+          </Typography>
+        </Stack>
+      </PageHero>
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
-        <Stack spacing={3}>
+        <Stack spacing={4}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<GroupsRoundedIcon />}
+                label="Active users"
+                value={usersLoading ? "…" : totalUsers}
+                trend="Invite colleagues to streamline handoffs"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<VerifiedUserRoundedIcon />}
+                label="Confirmers"
+                value={usersLoading ? "…" : confirmerCount}
+                trend="Ensure every lane has an approval owner"
+                color="secondary"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<EventBusyRoundedIcon />}
+                label="Requesters"
+                value={usersLoading ? "…" : requesterCount}
+                trend="Balance intake across teams"
+                color="info"
+              />
+            </Grid>
+          </Grid>
+
           <CalendarOverview description="Review confirmed import requests and prepare for upcoming arrivals." />
         </Stack>
       </Container>
