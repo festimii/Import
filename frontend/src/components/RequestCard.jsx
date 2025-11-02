@@ -96,6 +96,16 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
               </Typography>
               <Typography variant="body1">{req.Importer}</Typography>
             </Stack>
+            {req.Comment && (
+              <Stack spacing={0.5}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Requester note
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                  {req.Comment}
+                </Typography>
+              </Stack>
+            )}
             <Stack spacing={0.5} direction={{ xs: "column", sm: "row" }} gap={{ sm: 6 }}>
               <Box>
                 <Typography variant="subtitle2" color="text.secondary">

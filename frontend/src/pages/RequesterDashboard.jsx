@@ -27,6 +27,7 @@ export default function RequesterDashboard() {
   const [article, setArticle] = useState("");
   const [arrivalDate, setArrivalDate] = useState("");
   const [palletCount, setPalletCount] = useState("");
+  const [comment, setComment] = useState("");
   const [feedback, setFeedback] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [notificationsFeedback, setNotificationsFeedback] = useState(null);
@@ -84,6 +85,7 @@ export default function RequesterDashboard() {
         importer,
         article: formatArticleCode(article),
         palletCount: Number(palletCount),
+        comment,
       });
       setFeedback({
         severity: "success",
@@ -93,6 +95,7 @@ export default function RequesterDashboard() {
       setArticle("");
       setArrivalDate("");
       setPalletCount("");
+      setComment("");
     } catch (error) {
       setFeedback({
         severity: "error",
@@ -263,6 +266,16 @@ export default function RequesterDashboard() {
                     onChange={(event) => setPalletCount(event.target.value)}
                     inputProps={{ min: 0 }}
                     required
+                    fullWidth
+                  />
+                  <TextField
+                    label="Additional context"
+                    value={comment}
+                    onChange={(event) => setComment(event.target.value)}
+                    placeholder="Share helpful notes for confirmers and admins"
+                    helperText="Optional. Visible to everyone reviewing the request."
+                    multiline
+                    minRows={3}
                     fullWidth
                   />
 

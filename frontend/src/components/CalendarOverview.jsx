@@ -216,11 +216,25 @@ const CalendarOverview = ({
                             return format(parsed, "MMMM d, yyyy");
                           })();
 
-                          return `Arrival: ${arrivalDate} • Pallets: ${
+                          const details = `Arrival: ${arrivalDate} • Pallets: ${
                             request.PalletCount ?? "N/A"
                           } • Request date: ${requestDate} • Confirmed by ${
                             request.ConfirmedBy ?? "Unknown"
                           }`;
+
+                          if (!request.Comment) {
+                            return details;
+                          }
+
+                          return (
+                            <span>
+                              {details}
+                              <br />
+                              <span style={{ whiteSpace: "pre-wrap" }}>
+                                Note: {request.Comment}
+                              </span>
+                            </span>
+                          );
                         })()}
                       />
                     </ListItem>

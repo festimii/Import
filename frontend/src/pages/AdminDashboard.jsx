@@ -1,15 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Box,
   Button,
+  CircularProgress,
   Container,
   Grid,
+  Paper,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   Typography,
 } from "@mui/material";
 import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
 import VerifiedUserRoundedIcon from "@mui/icons-material/VerifiedUserRounded";
 import EventBusyRoundedIcon from "@mui/icons-material/EventBusyRounded";
+import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
+import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
+import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
+import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
+import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
+import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
+import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
@@ -22,6 +37,25 @@ export default function AdminDashboard() {
   const [userFeedback, setUserFeedback] = useState(null);
   const [updatingUser, setUpdatingUser] = useState(null);
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
+  const [importMetrics, setImportMetrics] = useState(null);
+  const [importMetricsLoading, setImportMetricsLoading] = useState(true);
+  const [importMetricsFeedback, setImportMetricsFeedback] = useState(null);
+
+  const loadImportMetrics = async () => {
+    setImportMetricsLoading(true);
+    setImportMetricsFeedback(null);
+    try {
+      const res = await API.get("/imports/metrics");
+      setImportMetrics(res.data);
+    } catch (error) {
+      setImportMetricsFeedback({
+        severity: "error",
+        message: "Unable to load import metrics right now.",
+      });
+    } finally {
+      setImportMetricsLoading(false);
+    }
+  };
 
   const loadUsers = async () => {
     setUsersLoading(true);
@@ -41,6 +75,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadUsers();
+    loadImportMetrics();
   }, []);
 
   useEffect(() => {
@@ -176,6 +211,150 @@ export default function AdminDashboard() {
               />
             </Grid>
           </Grid>
+
+          <Stack spacing={1}>
+            <Typography variant="h6">Import operations snapshot</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Track request volume, approvals and near-term arrivals at a glance.
+            </Typography>
+          </Stack>
+
+          {importMetricsFeedback && (
+            <Alert severity={importMetricsFeedback.severity}>
+              {importMetricsFeedback.message}
+            </Alert>
+          )}
+
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={3}>
+              <StatCard
+                icon={<ChecklistRoundedIcon />}
+                label="Total requests"
+                value={importMetricsLoading ? "…" : importMetrics?.totalRequests ?? 0}
+                trend="All submissions recorded in the system"
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <StatCard
+                icon={<EventAvailableRoundedIcon />}
+                label="Approved"
+                value={importMetricsLoading ? "…" : importMetrics?.approvedCount ?? 0}
+                trend="Confirmed arrivals awaiting execution"
+                color="secondary"
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <StatCard
+                icon={<ScheduleRoundedIcon />}
+                label="Pending"
+                value={importMetricsLoading ? "…" : importMetrics?.pendingCount ?? 0}
+                trend="Requests still waiting on a decision"
+                color="info"
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <StatCard
+                icon={<NotificationsActiveRoundedIcon />}
+                label="Arrivals this week"
+                value={importMetricsLoading ? "…" : importMetrics?.upcomingWeek ?? 0}
+                trend="Approved deliveries in the next seven days"
+                color="warning"
+              />
+            </Grid>
+          </Grid>
+
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<Inventory2RoundedIcon />}
+                label="Total pallets"
+                value={importMetricsLoading ? "…" : importMetrics?.totalPallets ?? 0}
+                trend="Aggregate load across every request"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<AssessmentRoundedIcon />}
+                label="Avg. pallets / request"
+                value={(() => {
+                  if (importMetricsLoading) return "…";
+                  const average = importMetrics?.averagePallets ?? 0;
+                  if (!average) return "—";
+                  return `${average} pallets`;
+                })()}
+                trend="Helps plan warehouse capacity"
+                color="secondary"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <StatCard
+                icon={<TrendingUpRoundedIcon />}
+                label="Approval ratio"
+                value={(() => {
+                  if (importMetricsLoading) return "…";
+                  const total = importMetrics?.totalRequests ?? 0;
+                  const approved = importMetrics?.approvedCount ?? 0;
+                  if (!total) return "—";
+                  return `${Math.round((approved / total) * 100)}%`;
+                })()}
+                trend="Share of requests that receive a green light"
+                color="success"
+              />
+            </Grid>
+          </Grid>
+
+          <Paper
+            elevation={12}
+            sx={{
+              p: { xs: 3, md: 5 },
+              borderRadius: 4,
+              background: (theme) =>
+                `linear-gradient(160deg, ${theme.palette.background.paper} 0%, ${theme.palette.action.hover} 100%)`,
+            }}
+          >
+            <Stack spacing={3}>
+              <Stack spacing={0.5}>
+                <Typography variant="h6">Monthly request trend</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Compare intake volume and pallet totals month over month.
+                </Typography>
+              </Stack>
+
+              {importMetricsLoading ? (
+                <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                  <CircularProgress color="primary" />
+                </Box>
+              ) : importMetrics?.monthlyRequests?.length ? (
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600 }}>Month</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        Requests
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        Pallets
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {importMetrics.monthlyRequests.map((entry) => (
+                      <TableRow key={entry.month} hover>
+                        <TableCell>{entry.month}</TableCell>
+                        <TableCell align="right">{entry.requestCount}</TableCell>
+                        <TableCell align="right">{entry.palletTotal}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No historical data available yet. New submissions will populate this
+                  view automatically.
+                </Typography>
+              )}
+            </Stack>
+          </Paper>
 
           <CalendarOverview description="Review confirmed import requests and prepare for upcoming arrivals." />
         </Stack>
