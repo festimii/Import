@@ -23,6 +23,7 @@ import RequestCard from "../components/RequestCard";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
+import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 
 export default function ConfirmerDashboard() {
   const [requests, setRequests] = useState([]);
@@ -187,6 +188,7 @@ export default function ConfirmerDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
+          <NotificationPermissionBanner />
           {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
 
           <Grid container spacing={3}>
