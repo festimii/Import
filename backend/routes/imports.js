@@ -1,6 +1,10 @@
 import express from "express";
 import { poolPromise } from "../db.js";
 import { verifyRole } from "../middleware/auth.js";
+import {
+  broadcastPushNotification,
+  createNotifications,
+} from "../services/notifications.js";
 
 const router = express.Router();
 
@@ -268,7 +272,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       .request()
       .input("ID", req.params.id)
       .query(
-        `SELECT DataArritjes AS CurrentArrivalDate, Useri AS Requester
+        `SELECT DataArritjes AS CurrentArrivalDate, Useri AS Requester, Status AS CurrentStatus
          FROM ImportRequests
          WHERE ID = @ID`
       );
@@ -277,7 +281,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       return res.status(404).json({ message: "Import request not found." });
     }
 
-    const { CurrentArrivalDate, Requester: requesterUsername } =
+    const { CurrentArrivalDate, Requester: requesterUsername, CurrentStatus } =
       existingResult.recordset[0];
 
     let arrivalDateSqlValue;
@@ -328,7 +332,9 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
             WHERE ID = @ID`);
     const [record] = mapArticles(result.recordset);
 
-    if (arrivalDateSqlValue && requesterUsername) {
+    const notificationsToDispatch = [];
+
+    if (arrivalDateSqlValue) {
       const previousDate = (() => {
         if (!CurrentArrivalDate) return null;
         const parsed = new Date(CurrentArrivalDate);
@@ -336,22 +342,68 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         return parsed.toISOString().split("T")[0];
       })();
 
-      const message = previousDate
-        ? `Arrival date changed from ${previousDate} to ${arrivalDateSqlValue} by ${req.user.username}.`
-        : `Arrival date set to ${arrivalDateSqlValue} by ${req.user.username}.`;
+      if (!previousDate || previousDate !== arrivalDateSqlValue) {
+        const requesterContext = requesterUsername
+          ? ` (requested by ${requesterUsername})`
+          : "";
+        const message = previousDate
+          ? `Arrival date${requesterContext} changed from ${previousDate} to ${arrivalDateSqlValue} by ${req.user.username}.`
+          : `Arrival date${requesterContext} set to ${arrivalDateSqlValue} by ${req.user.username}.`;
 
+        notificationsToDispatch.push({
+          message,
+          type: "arrival_date_change",
+        });
+      }
+    }
+
+    if (status) {
+      const normalizedStatus = String(status).toLowerCase();
+      const previousStatus = (CurrentStatus || "").toLowerCase();
+
+      if (normalizedStatus !== previousStatus) {
+        const statusMessage = (() => {
+          if (normalizedStatus === "approved") {
+            return `Request ${record.ID} was approved by ${req.user.username}.`;
+          }
+
+          if (normalizedStatus === "rejected") {
+            return `Request ${record.ID} was rejected by ${req.user.username}.`;
+          }
+
+          return `Request ${record.ID} status updated to ${status} by ${req.user.username}.`;
+        })();
+
+        notificationsToDispatch.push({
+          message: statusMessage,
+          type: `status_${normalizedStatus || "update"}`,
+        });
+      }
+    }
+
+    for (const notification of notificationsToDispatch) {
       try {
-        await pool
-          .request()
-          .input("RequestID", record.ID)
-          .input("Username", requesterUsername)
-          .input("Message", message)
-          .input("Type", "arrival_date_change")
-          .query(`INSERT INTO RequestNotifications (RequestID, Username, Message, Type)
-                  VALUES (@RequestID, @Username, @Message, @Type)`);
+        const created = await createNotifications(pool, {
+          requestId: record.ID,
+          message: notification.message,
+          type: notification.type,
+          excludeUsername: req.user.username,
+        });
+
+        if (created.length > 0) {
+          await broadcastPushNotification({
+            title: "📦 Import Tracker",
+            body: notification.message,
+            data: {
+              requestId: record.ID,
+              type: notification.type,
+              createdAt: new Date().toISOString(),
+            },
+          });
+        }
       } catch (notificationError) {
         console.error(
-          "Notification insert error:",
+          "Notification dispatch error:",
           notificationError.message
         );
       }
