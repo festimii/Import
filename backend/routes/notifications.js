@@ -1,24 +1,15 @@
 import express from "express";
-import webpush from "web-push";
-import dotenv from "dotenv";
 import { poolPromise } from "../db.js";
 import { verifyRole } from "../middleware/auth.js";
+import {
+  broadcastPushNotification,
+  createNotifications,
+  getPublicKey,
+  storeSubscription,
+} from "../services/notifications.js";
 
-dotenv.config();
 const router = express.Router();
 const allowedRoles = ["admin", "confirmer", "requester"];
-
-// ===================
-// VAPID CONFIGURATION
-// ===================
-webpush.setVapidDetails(
-  "mailto:you@example.com", // contact email
-  process.env.PUBLIC_KEY,
-  process.env.PRIVATE_KEY
-);
-
-// store active push subscriptions in memory (you can persist later)
-const subscriptions = [];
 
 // ===========================================================
 // 1️⃣  FRONTEND PUSH SUBSCRIPTION HANDLERS
@@ -26,19 +17,17 @@ const subscriptions = [];
 
 // Public key endpoint (for React frontend)
 router.get("/public-key", (req, res) => {
-  res.json({ publicKey: process.env.PUBLIC_KEY });
+  res.json({ publicKey: getPublicKey() });
 });
 
 // Subscribe endpoint — called by React once service worker registers
 router.post("/subscribe", (req, res) => {
   const subscription = req.body;
-  if (!subscription?.endpoint)
-    return res.status(400).json({ error: "Invalid subscription" });
+  const stored = storeSubscription(subscription);
 
-  const exists = subscriptions.some(
-    (s) => s.endpoint === subscription.endpoint
-  );
-  if (!exists) subscriptions.push(subscription);
+  if (!stored) {
+    return res.status(400).json({ error: "Invalid subscription" });
+  }
 
   console.log("✅ New push subscription:", subscription.endpoint);
   res.status(201).json({ message: "Subscribed successfully" });
@@ -93,15 +82,14 @@ router.patch("/:id/read", verifyRole(allowedRoles), async (req, res) => {
 // ===========================================================
 
 router.post("/send", verifyRole(["admin", "confirmer"]), async (req, res) => {
-  const { title, body } = req.body;
-  const payload = JSON.stringify({
+  const { title, body, data } = req.body;
+  const payload = {
     title: title || "New Notification",
     body: body || "You have a new message",
-  });
+    data: data || {},
+  };
 
-  const results = await Promise.allSettled(
-    subscriptions.map((sub) => webpush.sendNotification(sub, payload))
-  );
+  const results = await broadcastPushNotification(payload);
 
   res.json({ status: "ok", results });
 });
@@ -114,34 +102,41 @@ router.post("/send", verifyRole(["admin", "confirmer"]), async (req, res) => {
 // 4️⃣  IMPROVED: SEND PUSH WHEN NEW RECORD INSERTED
 // ===========================================================
 router.post("/create", verifyRole(allowedRoles), async (req, res) => {
-  const { RequestID, Message, Type, TargetUsername } = req.body;
+  const { RequestID, Message, Type, TargetUsername, Audience } = req.body;
+
+  if (!RequestID || !Message) {
+    return res.status(400).json({ message: "Missing required notification data." });
+  }
 
   try {
     const pool = await poolPromise;
+    const explicitAudience = [];
 
-    // --- Insert DB record ---
-    const result = await pool
-      .request()
-      .input("RequestID", RequestID)
-      .input("Username", TargetUsername)
-      .input("Message", Message)
-      .input("Type", Type).query(`
-        INSERT INTO RequestNotifications
-          (RequestID, Username, Message, Type, CreatedAt)
-        OUTPUT INSERTED.*
-        VALUES (@RequestID, @Username, @Message, @Type, GETDATE())
-      `);
+    if (TargetUsername) {
+      explicitAudience.push(TargetUsername);
+    }
 
-    const newNotif = result.recordset[0];
+    if (Array.isArray(Audience)) {
+      for (const username of Audience) {
+        if (username && !explicitAudience.includes(username)) {
+          explicitAudience.push(username);
+        }
+      }
+    }
 
-    // --- Construct push payload ---
-    const payload = JSON.stringify({
+    const created = await createNotifications(pool, {
+      requestId: RequestID,
+      message: Message,
+      type: Type || "info",
+      usernames: explicitAudience.length > 0 ? explicitAudience : undefined,
+    });
+
+    const pushResults = await broadcastPushNotification({
       title: "📦 Import Tracker",
       body: Message || "A new import request requires your attention.",
       data: {
         requestId: RequestID,
-        username: TargetUsername,
-        type: Type,
+        type: Type || "info",
         createdAt: new Date().toISOString(),
       },
       actions: [
@@ -150,27 +145,7 @@ router.post("/create", verifyRole(allowedRoles), async (req, res) => {
       ],
     });
 
-    // --- Send to all active subscriptions ---
-    const sendResults = await Promise.allSettled(
-      subscriptions.map((sub) =>
-        webpush.sendNotification(sub, payload).catch((err) => {
-          // Clean up invalid subscriptions (410 Gone)
-          if (err.statusCode === 410 || err.statusCode === 404) {
-            const idx = subscriptions.indexOf(sub);
-            if (idx >= 0) subscriptions.splice(idx, 1);
-            console.log("🧹 Removed stale subscription:", sub.endpoint);
-          } else {
-            console.error("Push send error:", err.message);
-          }
-        })
-      )
-    );
-
-    console.log(
-      `📨 Sent notification for RequestID=${RequestID} to ${subscriptions.length} clients`
-    );
-
-    res.status(201).json({ notification: newNotif, pushResults: sendResults });
+    res.status(201).json({ notification: created, pushResults });
   } catch (err) {
     console.error("❌ Notification create error:", err.message);
     res.status(500).json({ message: "Server error" });
