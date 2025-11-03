@@ -1,6 +1,7 @@
 import express from "express";
 import { poolPromise } from "../db.js";
 import { verifyRole } from "../middleware/auth.js";
+import { dispatchNotification } from "./notifications.js";
 
 const router = express.Router();
 
@@ -109,6 +110,27 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
                      INSERTED.CreatedAt
               VALUES (@DataKerkeses, @DataArritjes, @Importuesi, @Artikulli, @NumriPaletave, @Useri, @Comment)`);
     const [record] = mapArticles(result.recordset);
+
+    try {
+      await dispatchNotification({
+        requestId: record.ID,
+        message: `New import request #${record.ID} created by ${req.user.username}.`,
+        type: "request_created",
+        roles: ["confirmer", "admin"],
+        actor: req.user.username,
+        data: {
+          status: record.Status,
+          importer: record.Importer,
+          article: record.Article,
+        },
+      });
+    } catch (notificationError) {
+      console.error(
+        "Notification dispatch error (create):",
+        notificationError.message
+      );
+    }
+
     res.json(record);
   } catch (err) {
     console.error("Create error:", err.message);
@@ -268,7 +290,9 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       .request()
       .input("ID", req.params.id)
       .query(
-        `SELECT DataArritjes AS CurrentArrivalDate, Useri AS Requester
+        `SELECT DataArritjes AS CurrentArrivalDate,
+                Useri AS Requester,
+                Status AS CurrentStatus
          FROM ImportRequests
          WHERE ID = @ID`
       );
@@ -277,8 +301,19 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       return res.status(404).json({ message: "Import request not found." });
     }
 
-    const { CurrentArrivalDate, Requester: requesterUsername } =
+    const {
+      CurrentArrivalDate,
+      Requester: requesterUsername,
+      CurrentStatus,
+    } =
       existingResult.recordset[0];
+
+    const previousArrivalDate = (() => {
+      if (!CurrentArrivalDate) return null;
+      const parsed = new Date(CurrentArrivalDate);
+      if (Number.isNaN(parsed.getTime())) return null;
+      return parsed.toISOString().split("T")[0];
+    })();
 
     let arrivalDateSqlValue;
     if (arrivalDate) {
@@ -328,33 +363,64 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
             WHERE ID = @ID`);
     const [record] = mapArticles(result.recordset);
 
+    const notificationsToDispatch = [];
+
+    if (status && status !== CurrentStatus) {
+      const normalizedStatus = String(status).toLowerCase();
+      const statusMessageMap = {
+        approved: `Import request #${record.ID} approved by ${req.user.username}.`,
+        rejected: `Import request #${record.ID} rejected by ${req.user.username}.`,
+        pending: `Import request #${record.ID} marked as pending by ${req.user.username}.`,
+      };
+      const statusMessage =
+        statusMessageMap[normalizedStatus] ||
+        `Import request #${record.ID} status updated to ${status} by ${req.user.username}.`;
+
+      notificationsToDispatch.push({
+        requestId: record.ID,
+        message: statusMessage,
+        type: `status_${normalizedStatus}`,
+        usernames: requesterUsername ? [requesterUsername] : [],
+        roles: ["admin", "confirmer"],
+        actor: req.user.username,
+        data: { status: normalizedStatus },
+      });
+    }
+
     if (arrivalDateSqlValue && requesterUsername) {
-      const previousDate = (() => {
-        if (!CurrentArrivalDate) return null;
-        const parsed = new Date(CurrentArrivalDate);
-        if (Number.isNaN(parsed.getTime())) return null;
-        return parsed.toISOString().split("T")[0];
-      })();
+      if (arrivalDateSqlValue !== previousArrivalDate) {
+        const message = previousArrivalDate
+          ? `Arrival date changed from ${previousArrivalDate} to ${arrivalDateSqlValue} by ${req.user.username}.`
+          : `Arrival date set to ${arrivalDateSqlValue} by ${req.user.username}.`;
 
-      const message = previousDate
-        ? `Arrival date changed from ${previousDate} to ${arrivalDateSqlValue} by ${req.user.username}.`
-        : `Arrival date set to ${arrivalDateSqlValue} by ${req.user.username}.`;
-
-      try {
-        await pool
-          .request()
-          .input("RequestID", record.ID)
-          .input("Username", requesterUsername)
-          .input("Message", message)
-          .input("Type", "arrival_date_change")
-          .query(`INSERT INTO RequestNotifications (RequestID, Username, Message, Type)
-                  VALUES (@RequestID, @Username, @Message, @Type)`);
-      } catch (notificationError) {
-        console.error(
-          "Notification insert error:",
-          notificationError.message
-        );
+        notificationsToDispatch.push({
+          requestId: record.ID,
+          message,
+          type: "arrival_date_change",
+          usernames: [requesterUsername],
+          roles: ["admin", "confirmer"],
+          actor: req.user.username,
+          data: {
+            previousArrivalDate,
+            arrivalDate: arrivalDateSqlValue,
+          },
+        });
       }
+    }
+
+    if (notificationsToDispatch.length > 0) {
+      const results = await Promise.allSettled(
+        notificationsToDispatch.map((payload) => dispatchNotification(payload))
+      );
+
+      results.forEach((result) => {
+        if (result.status === "rejected") {
+          console.error(
+            "Notification dispatch error (update):",
+            result.reason?.message || result.reason
+          );
+        }
+      });
     }
 
     res.json(record);
