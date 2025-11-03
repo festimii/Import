@@ -18,6 +18,7 @@ import formatArticleCode from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
+import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -179,6 +180,7 @@ export default function RequesterDashboard() {
           </Grid>
 
           <Stack spacing={2}>
+            <NotificationPermissionBanner onEnabled={loadNotifications} />
             {notificationsFeedback && (
               <Alert severity={notificationsFeedback.severity}>
                 {notificationsFeedback.message}

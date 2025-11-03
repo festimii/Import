@@ -1,9 +1,34 @@
 // src/notifications.js
-const BACKEND_URL = "http://localhost:5000"; // backend base URL
+const resolveBackendUrl = () => {
+  if (typeof import.meta !== "undefined" && import.meta.env) {
+    const { VITE_BACKEND_URL, VITE_API_BASE_URL } = import.meta.env;
+    const candidates = [VITE_BACKEND_URL, VITE_API_BASE_URL]
+      .filter(Boolean)
+      .map((value) => value.replace(/\/$/, ""))
+      .map((value) => value.replace(/\/api$/, ""));
+
+    if (candidates.length > 0) {
+      return candidates[0];
+    }
+  }
+
+  return "http://localhost:5000";
+};
+
+const BACKEND_URL = resolveBackendUrl();
+
+export function isPushSupported() {
+  return (
+    typeof window !== "undefined" &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window
+  );
+}
 
 export async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) {
-    throw new Error("Service workers not supported in this browser");
+  if (!isPushSupported()) {
+    throw new Error("Push notifications are not supported in this browser");
   }
 
   const reg = await navigator.serviceWorker.register("/sw.js");
@@ -12,14 +37,29 @@ export async function registerServiceWorker() {
 }
 
 export async function askNotificationPermission() {
+  if (!isPushSupported()) {
+    throw new Error("Push notifications are not supported in this browser");
+  }
+
+  if (Notification.permission === "granted") {
+    return "granted";
+  }
+
   const permission = await Notification.requestPermission();
   if (permission !== "granted") {
     throw new Error("Notification permission denied");
   }
   console.log("✅ Notification permission granted");
+  return permission;
 }
 
 export async function subscribeUserToPush(registration) {
+  const existingSubscription = await registration.pushManager.getSubscription();
+  if (existingSubscription) {
+    console.log("ℹ️ Existing push subscription found");
+    return existingSubscription;
+  }
+
   // 1️⃣ Fetch the VAPID public key from backend
   const keyResponse = await fetch(
     `${BACKEND_URL}/api/notifications/public-key`
@@ -48,6 +88,7 @@ export async function subscribeUserToPush(registration) {
   }
 
   console.log("✅ Push subscription sent to backend");
+  return subscription;
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -58,4 +99,16 @@ function urlBase64ToUint8Array(base64String) {
   for (let i = 0; i < rawData.length; ++i)
     outputArray[i] = rawData.charCodeAt(i);
   return outputArray;
+}
+
+export async function enablePushNotifications() {
+  if (!isPushSupported()) {
+    throw new Error("Push notifications are not supported in this browser");
+  }
+
+  const registration = await registerServiceWorker();
+  await askNotificationPermission();
+
+  await subscribeUserToPush(registration);
+  return registration;
 }

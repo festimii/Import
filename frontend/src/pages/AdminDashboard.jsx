@@ -30,6 +30,7 @@ import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
+import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
@@ -183,6 +184,7 @@ export default function AdminDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
+          <NotificationPermissionBanner />
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
               <StatCard
