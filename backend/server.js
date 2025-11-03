@@ -8,7 +8,7 @@ import notificationRoutes from "./routes/notifications.js";
 dotenv.config();
 const app = express();
 
-app.use(cors({ origin: "http://localhost:5173" }));
+app.use(cors({ origin: "http://0.0.0.0:5173" }));
 app.use(express.json());
 
 // Routes
