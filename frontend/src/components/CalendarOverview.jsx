@@ -216,7 +216,9 @@ const CalendarOverview = ({
                             return format(parsed, "MMMM d, yyyy");
                           })();
 
-                          const details = `Arrival: ${arrivalDate} • Pallets: ${
+                          const details = `Arrival: ${arrivalDate} • Boxes: ${
+                            request.BoxCount ?? "N/A"
+                          } • Pallets: ${
                             request.PalletCount ?? "N/A"
                           } • Request date: ${requestDate} • Confirmed by ${
                             request.ConfirmedBy ?? "Unknown"

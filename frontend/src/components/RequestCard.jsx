@@ -41,6 +41,23 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
   const articleValue = formatArticleCode(req.Article);
   const statusLabel = req.Status ? req.Status : "pending";
 
+  const formatQuantity = (value, fractionDigits = 0) => {
+    if (value === null || value === undefined) return "N/A";
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return "N/A";
+    return numericValue.toLocaleString(undefined, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    });
+  };
+
+  const formattedPalletCount = formatQuantity(req.PalletCount);
+  const formattedBoxCount = formatQuantity(req.BoxCount);
+  const formattedFullPallets = formatQuantity(req.FullPallets, 2);
+  const formattedRemainingBoxes = formatQuantity(req.RemainingBoxes);
+  const formattedTotalWeight = formatQuantity(req.TotalShipmentWeightKg, 2);
+  const formattedTotalVolume = formatQuantity(req.TotalShipmentVolumeM3, 3);
+
   return (
     <Card
       elevation={12}
@@ -123,16 +140,76 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
             <Stack spacing={0.5} direction={{ xs: "column", sm: "row" }} gap={{ sm: 6 }}>
               <Box>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Number of pallets
+                  Box quantity (Sasia - Pako)
                 </Typography>
-                <Typography variant="body1">{req.PalletCount ?? "N/A"}</Typography>
+                <Typography variant="body1">{formattedBoxCount}</Typography>
               </Box>
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Calculated pallets
+                </Typography>
+                <Typography variant="body1">{formattedPalletCount}</Typography>
+              </Box>
+            </Stack>
+            {(req.FullPallets !== undefined && req.FullPallets !== null) ||
+            (req.RemainingBoxes !== undefined && req.RemainingBoxes !== null) ? (
+              <Stack
+                spacing={0.5}
+                direction={{ xs: "column", sm: "row" }}
+                gap={{ sm: 6 }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Full pallets
+                  </Typography>
+                  <Typography variant="body1">{formattedFullPallets}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Remaining boxes
+                  </Typography>
+                  <Typography variant="body1">{formattedRemainingBoxes}</Typography>
+                </Box>
+              </Stack>
+            ) : null}
+            {(req.TotalShipmentWeightKg !== undefined &&
+              req.TotalShipmentWeightKg !== null) ||
+            (req.TotalShipmentVolumeM3 !== undefined &&
+              req.TotalShipmentVolumeM3 !== null) ? (
+              <Stack
+                spacing={0.5}
+                direction={{ xs: "column", sm: "row" }}
+                gap={{ sm: 6 }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Total shipment weight (kg)
+                  </Typography>
+                  <Typography variant="body1">{formattedTotalWeight}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Total shipment volume (m³)
+                  </Typography>
+                  <Typography variant="body1">{formattedTotalVolume}</Typography>
+                </Box>
+              </Stack>
+            ) : null}
+            <Stack spacing={0.5} direction={{ xs: "column", sm: "row" }} gap={{ sm: 6 }}>
               <Box>
                 <Typography variant="subtitle2" color="text.secondary">
                   Requested by
                 </Typography>
                 <Typography variant="body1" fontWeight={600}>
                   {req.Requester}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Confirmed by
+                </Typography>
+                <Typography variant="body1" fontWeight={600}>
+                  {req.ConfirmedBy ?? "—"}
                 </Typography>
               </Box>
             </Stack>

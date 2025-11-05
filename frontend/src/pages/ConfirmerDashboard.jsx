@@ -135,17 +135,50 @@ export default function ConfirmerDashboard() {
   };
 
   const pendingCount = requests.length;
-  const averagePallets = useMemo(() => {
+  const averageLoad = useMemo(() => {
     if (pendingCount === 0) return "—";
-    const total = requests.reduce((sum, request) => {
-      const count = Number(request.PalletCount);
-      return sum + (Number.isFinite(count) ? count : 0);
-    }, 0);
-    const average = total / pendingCount;
-    if (!Number.isFinite(average) || average === 0) {
+
+    const totals = requests.reduce(
+      (acc, request) => {
+        const palletValue = Number(request.PalletCount);
+        if (Number.isFinite(palletValue)) {
+          acc.pallets += palletValue;
+        }
+
+        const boxValue = Number(request.BoxCount);
+        if (Number.isFinite(boxValue)) {
+          acc.boxes += boxValue;
+        }
+
+        return acc;
+      },
+      { pallets: 0, boxes: 0 }
+    );
+
+    const formatAverage = (value, unit) => {
+      if (!Number.isFinite(value) || value <= 0) {
+        return null;
+      }
+      const normalized = Math.round(value * 10) / 10;
+      return `${normalized} ${unit}`;
+    };
+
+    const averages = [];
+    const boxAverage = formatAverage(totals.boxes / pendingCount, "boxes");
+    if (boxAverage) {
+      averages.push(boxAverage);
+    }
+
+    const palletAverage = formatAverage(totals.pallets / pendingCount, "pallets");
+    if (palletAverage) {
+      averages.push(palletAverage);
+    }
+
+    if (averages.length === 0) {
       return "—";
     }
-    return `${Math.round(average)} pallets`;
+
+    return averages.join(" • ");
   }, [pendingCount, requests]);
 
   const awaitingSchedule = useMemo(
@@ -204,8 +237,8 @@ export default function ConfirmerDashboard() {
               <StatCard
                 icon={<Inventory2RoundedIcon />}
                 label="Average load"
-                value={loading ? "…" : averagePallets}
-                trend="Helps plan capacity with logistics"
+                value={loading ? "…" : averageLoad}
+                trend="Average boxes and pallets per pending request"
                 color="secondary"
               />
             </Grid>
