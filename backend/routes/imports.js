@@ -22,11 +22,112 @@ const normalizeArticleCode = (value) => {
   return stringValue;
 };
 
+const numberOrNull = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue)) {
+    return numericValue;
+  }
+
+  return null;
+};
+
+const normalizePalletCalculation = (row = {}) => {
+  const fullPalletsRaw = numberOrNull(row.Full_Pallets) ?? 0;
+  const boxesPerPallet = numberOrNull(row.Boxes_per_Pallet);
+  const remainingBoxes = numberOrNull(row.Remaining_Boxes) ?? 0;
+  const baseFullPallets = Number.isFinite(fullPalletsRaw)
+    ? Math.max(0, Math.floor(fullPalletsRaw))
+    : 0;
+  const partialPallets = (() => {
+    if (!Number.isFinite(remainingBoxes) || remainingBoxes <= 0) {
+      return 0;
+    }
+    if (Number.isFinite(boxesPerPallet) && boxesPerPallet > 0) {
+      return Math.ceil(remainingBoxes / boxesPerPallet);
+    }
+    return 1;
+  })();
+  const totalPalletPositions = baseFullPallets + partialPallets;
+
+  return {
+    boxesPerPallet,
+    boxesPerLayer: numberOrNull(row.Boxes_per_Layer),
+    layersPerPallet: numberOrNull(row.Layers_per_Pallet),
+    fullPallets: fullPalletsRaw,
+    remainingBoxes,
+    palletWeightKg: numberOrNull(row.Pallet_Weight_kg),
+    palletVolumeM3: numberOrNull(row.Pallet_Volume_m3),
+    boxWeightKg: numberOrNull(row.Box_Weight_kg),
+    boxVolumeM3: numberOrNull(row.Box_Volume_m3),
+    palletVolumeUtilization: numberOrNull(row.Pallet_Volume_Utilization),
+    weightFullPalletsKg: numberOrNull(row.Weight_Full_Pallets_kg),
+    volumeFullPalletsM3: numberOrNull(row.Volume_Full_Pallets_m3),
+    weightRemainingKg: numberOrNull(row.Weight_Remaining_kg),
+    volumeRemainingM3: numberOrNull(row.Volume_Remaining_m3),
+    totalShipmentWeightKg: numberOrNull(row.Total_Shipment_Weight_kg),
+    totalShipmentVolumeM3: numberOrNull(row.Total_Shipment_Volume_m3),
+    totalPalletPositions,
+  };
+};
+
+const calculatePalletization = async (pool, { article, boxCount }) => {
+  const result = await pool
+    .request()
+    .input("Sifra_Art", article)
+    .input("Order_Boxes", boxCount)
+    .execute("sp_CalcPalletsForOrder");
+
+  const calculationRow = result.recordset?.[0];
+  if (!calculationRow) {
+    throw new Error("Pallet calculation unavailable.");
+  }
+
+  return normalizePalletCalculation(calculationRow);
+};
+
+const NUMERIC_FIELDS = [
+  "BoxCount",
+  "PalletCount",
+  "BoxesPerPallet",
+  "BoxesPerLayer",
+  "LayersPerPallet",
+  "FullPallets",
+  "RemainingBoxes",
+  "PalletWeightKg",
+  "PalletVolumeM3",
+  "BoxWeightKg",
+  "BoxVolumeM3",
+  "PalletVolumeUtilization",
+  "WeightFullPalletsKg",
+  "VolumeFullPalletsM3",
+  "WeightRemainingKg",
+  "VolumeRemainingM3",
+  "TotalShipmentWeightKg",
+  "TotalShipmentVolumeM3",
+];
+
 const mapArticles = (records) =>
-  records.map((record) => ({
-    ...record,
-    Article: normalizeArticleCode(record.Article),
-  }));
+  records.map((record) => {
+    const mapped = {
+      ...record,
+      Article: normalizeArticleCode(record.Article),
+    };
+
+    for (const field of NUMERIC_FIELDS) {
+      if (mapped[field] !== null && mapped[field] !== undefined) {
+        const numericValue = Number(mapped[field]);
+        if (Number.isFinite(numericValue)) {
+          mapped[field] = numericValue;
+        }
+      }
+    }
+
+    return mapped;
+  });
 
 router.post("/", verifyRole(["requester"]), async (req, res) => {
   const {
@@ -34,22 +135,22 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
     arrivalDate,
     importer,
     article,
-    palletCount,
+    boxCount,
     comment,
   } = req.body;
 
-  if (!importer || !article || palletCount === undefined || !arrivalDate) {
+  if (!importer || !article || boxCount === undefined || !arrivalDate) {
     return res
       .status(400)
       .json({ message: "Missing required fields for import request." });
   }
 
-  const parsedPalletCount = Number(palletCount);
+  const parsedBoxCount = Number(boxCount);
 
-  if (!Number.isFinite(parsedPalletCount) || parsedPalletCount < 0) {
+  if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
     return res
       .status(400)
-      .json({ message: "Pallet count must be a non-negative number." });
+      .json({ message: "Box count must be a positive number." });
   }
 
   try {
@@ -90,28 +191,125 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
     const normalizedArticle = normalizeArticleCode(article);
 
     const pool = await poolPromise;
-    const result = await pool
+    const calculation = await calculatePalletization(pool, {
+      article: normalizedArticle,
+      boxCount: parsedBoxCount,
+    });
+
+    const palletCount = Number.isFinite(calculation.totalPalletPositions)
+      ? Math.max(0, Math.round(calculation.totalPalletPositions))
+      : 0;
+
+    const request = pool
       .request()
       .input("DataKerkeses", requestDateSqlValue)
       .input("DataArritjes", arrivalDateSqlValue)
       .input("Importuesi", importer)
       .input("Artikulli", normalizedArticle)
-      .input("NumriPaletave", parsedPalletCount)
+      .input("NumriPakove", parsedBoxCount)
+      .input("NumriPaletave", palletCount)
+      .input("BoxesPerPallet", calculation.boxesPerPallet ?? null)
+      .input("BoxesPerLayer", calculation.boxesPerLayer ?? null)
+      .input("LayersPerPallet", calculation.layersPerPallet ?? null)
+      .input("FullPallets", calculation.fullPallets ?? null)
+      .input("RemainingBoxes", calculation.remainingBoxes ?? null)
+      .input("PalletWeightKg", calculation.palletWeightKg ?? null)
+      .input("PalletVolumeM3", calculation.palletVolumeM3 ?? null)
+      .input("BoxWeightKg", calculation.boxWeightKg ?? null)
+      .input("BoxVolumeM3", calculation.boxVolumeM3 ?? null)
+      .input(
+        "PalletVolumeUtilization",
+        calculation.palletVolumeUtilization ?? null
+      )
+      .input("WeightFullPalletsKg", calculation.weightFullPalletsKg ?? null)
+      .input("VolumeFullPalletsM3", calculation.volumeFullPalletsM3 ?? null)
+      .input("WeightRemainingKg", calculation.weightRemainingKg ?? null)
+      .input("VolumeRemainingM3", calculation.volumeRemainingM3 ?? null)
+      .input("TotalShipmentWeightKg", calculation.totalShipmentWeightKg ?? null)
+      .input("TotalShipmentVolumeM3", calculation.totalShipmentVolumeM3 ?? null)
       .input("Comment", sanitizedComment)
-      .input("Useri", req.user.username)
-      .query(`INSERT INTO ImportRequests (DataKerkeses, DataArritjes, Importuesi, Artikulli, NumriPaletave, Useri, Comment)
+      .input("Useri", req.user.username);
+
+    const result = await request.query(`INSERT INTO ImportRequests (
+                DataKerkeses,
+                DataArritjes,
+                Importuesi,
+                Artikulli,
+                NumriPakove,
+                NumriPaletave,
+                BoxesPerPallet,
+                BoxesPerLayer,
+                LayersPerPallet,
+                FullPallets,
+                RemainingBoxes,
+                PalletWeightKg,
+                PalletVolumeM3,
+                BoxWeightKg,
+                BoxVolumeM3,
+                PalletVolumeUtilization,
+                WeightFullPalletsKg,
+                VolumeFullPalletsM3,
+                WeightRemainingKg,
+                VolumeRemainingM3,
+                TotalShipmentWeightKg,
+                TotalShipmentVolumeM3,
+                Useri,
+                Comment
+              )
               OUTPUT INSERTED.ID,
                      INSERTED.DataKerkeses AS RequestDate,
                      INSERTED.DataArritjes AS ArrivalDate,
                      INSERTED.Importuesi AS Importer,
                      INSERTED.Artikulli AS Article,
+                     INSERTED.NumriPakove AS BoxCount,
                      INSERTED.NumriPaletave AS PalletCount,
+                     INSERTED.BoxesPerPallet,
+                     INSERTED.BoxesPerLayer,
+                     INSERTED.LayersPerPallet,
+                     INSERTED.FullPallets,
+                     INSERTED.RemainingBoxes,
+                     INSERTED.PalletWeightKg,
+                     INSERTED.PalletVolumeM3,
+                     INSERTED.BoxWeightKg,
+                     INSERTED.BoxVolumeM3,
+                     INSERTED.PalletVolumeUtilization,
+                     INSERTED.WeightFullPalletsKg,
+                     INSERTED.VolumeFullPalletsM3,
+                     INSERTED.WeightRemainingKg,
+                     INSERTED.VolumeRemainingM3,
+                     INSERTED.TotalShipmentWeightKg,
+                     INSERTED.TotalShipmentVolumeM3,
                      INSERTED.Comment,
                      INSERTED.Useri AS Requester,
                      INSERTED.Status,
                      INSERTED.ConfirmedBy,
                      INSERTED.CreatedAt
-              VALUES (@DataKerkeses, @DataArritjes, @Importuesi, @Artikulli, @NumriPaletave, @Useri, @Comment)`);
+              VALUES (
+                @DataKerkeses,
+                @DataArritjes,
+                @Importuesi,
+                @Artikulli,
+                @NumriPakove,
+                @NumriPaletave,
+                @BoxesPerPallet,
+                @BoxesPerLayer,
+                @LayersPerPallet,
+                @FullPallets,
+                @RemainingBoxes,
+                @PalletWeightKg,
+                @PalletVolumeM3,
+                @BoxWeightKg,
+                @BoxVolumeM3,
+                @PalletVolumeUtilization,
+                @WeightFullPalletsKg,
+                @VolumeFullPalletsM3,
+                @WeightRemainingKg,
+                @VolumeRemainingM3,
+                @TotalShipmentWeightKg,
+                @TotalShipmentVolumeM3,
+                @Useri,
+                @Comment
+              )`);
     const [record] = mapArticles(result.recordset);
     res.json(record);
   } catch (err) {
@@ -121,6 +319,12 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
       err.message === "Invalid arrival date provided."
     ) {
       return res.status(400).json({ message: err.message });
+    }
+    if (err.message === "Pallet calculation unavailable.") {
+      return res.status(400).json({
+        message:
+          "We couldn't calculate pallet details for this article. Please verify the article code and box quantity.",
+      });
     }
     res.status(500).json({ message: "Server error" });
   }
@@ -137,7 +341,24 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
                      DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
+                     NumriPakove AS BoxCount,
                      NumriPaletave AS PalletCount,
+                     BoxesPerPallet,
+                     BoxesPerLayer,
+                     LayersPerPallet,
+                     FullPallets,
+                     RemainingBoxes,
+                     PalletWeightKg,
+                     PalletVolumeM3,
+                     BoxWeightKg,
+                     BoxVolumeM3,
+                     PalletVolumeUtilization,
+                     WeightFullPalletsKg,
+                     VolumeFullPalletsM3,
+                     WeightRemainingKg,
+                     VolumeRemainingM3,
+                     TotalShipmentWeightKg,
+                     TotalShipmentVolumeM3,
                      Comment,
                      Useri AS Requester,
                      Status,
@@ -167,7 +388,24 @@ router.get(
                      DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
+                     NumriPakove AS BoxCount,
                      NumriPaletave AS PalletCount,
+                     BoxesPerPallet,
+                     BoxesPerLayer,
+                     LayersPerPallet,
+                     FullPallets,
+                     RemainingBoxes,
+                     PalletWeightKg,
+                     PalletVolumeM3,
+                     BoxWeightKg,
+                     BoxVolumeM3,
+                     PalletVolumeUtilization,
+                     WeightFullPalletsKg,
+                     VolumeFullPalletsM3,
+                     WeightRemainingKg,
+                     VolumeRemainingM3,
+                     TotalShipmentWeightKg,
+                     TotalShipmentVolumeM3,
                      Comment,
                      Useri AS Requester,
                      Status,
@@ -197,6 +435,7 @@ router.get(
                        SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) AS PendingCount,
                        SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) AS ApprovedCount,
                        SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+                       SUM(CAST(NumriPakove AS INT)) AS TotalBoxes,
                        SUM(CAST(NumriPaletave AS INT)) AS TotalPallets
                 FROM ImportRequests`);
 
@@ -206,11 +445,17 @@ router.get(
       const pendingCount = Number(summary.PendingCount ?? 0);
       const approvedCount = Number(summary.ApprovedCount ?? 0);
       const rejectedCount = Number(summary.RejectedCount ?? 0);
+      const totalBoxesRaw = Number(summary.TotalBoxes ?? 0);
       const totalPalletsRaw = Number(summary.TotalPallets ?? 0);
+      const totalBoxes = Number.isFinite(totalBoxesRaw) ? totalBoxesRaw : 0;
       const totalPallets = Number.isFinite(totalPalletsRaw) ? totalPalletsRaw : 0;
       const averagePallets =
         totalRequests > 0 && totalPallets > 0
           ? Math.round((totalPallets / totalRequests) * 10) / 10
+          : 0;
+      const averageBoxes =
+        totalRequests > 0 && totalBoxes > 0
+          ? Math.round((totalBoxes / totalRequests) * 10) / 10
           : 0;
 
       const upcomingResult = await pool
@@ -228,7 +473,8 @@ router.get(
         .request()
         .query(`SELECT FORMAT(DataKerkeses, 'yyyy-MM') AS Month,
                        COUNT(*) AS RequestCount,
-                       SUM(CAST(NumriPaletave AS INT)) AS PalletTotal
+                       SUM(CAST(NumriPaletave AS INT)) AS PalletTotal,
+                       SUM(CAST(NumriPakove AS INT)) AS BoxTotal
                 FROM ImportRequests
                 GROUP BY FORMAT(DataKerkeses, 'yyyy-MM')
                 ORDER BY Month ASC`);
@@ -237,6 +483,7 @@ router.get(
         month: row.Month,
         requestCount: Number(row.RequestCount ?? 0),
         palletTotal: Number(row.PalletTotal ?? 0),
+        boxTotal: Number(row.BoxTotal ?? 0),
       }));
 
       res.json({
@@ -244,8 +491,10 @@ router.get(
         pendingCount,
         approvedCount,
         rejectedCount,
+        totalBoxes,
         totalPallets,
         averagePallets,
+        averageBoxes,
         upcomingWeek,
         monthlyRequests,
       });
@@ -323,7 +572,24 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                    INSERTED.DataArritjes AS ArrivalDate,
                    INSERTED.Importuesi AS Importer,
                    INSERTED.Artikulli AS Article,
+                   INSERTED.NumriPakove AS BoxCount,
                    INSERTED.NumriPaletave AS PalletCount,
+                   INSERTED.BoxesPerPallet,
+                   INSERTED.BoxesPerLayer,
+                   INSERTED.LayersPerPallet,
+                   INSERTED.FullPallets,
+                   INSERTED.RemainingBoxes,
+                   INSERTED.PalletWeightKg,
+                   INSERTED.PalletVolumeM3,
+                   INSERTED.BoxWeightKg,
+                   INSERTED.BoxVolumeM3,
+                   INSERTED.PalletVolumeUtilization,
+                   INSERTED.WeightFullPalletsKg,
+                   INSERTED.VolumeFullPalletsM3,
+                   INSERTED.WeightRemainingKg,
+                   INSERTED.VolumeRemainingM3,
+                   INSERTED.TotalShipmentWeightKg,
+                   INSERTED.TotalShipmentVolumeM3,
                    INSERTED.Comment,
                    INSERTED.Useri AS Requester,
                    INSERTED.Status,

@@ -27,7 +27,7 @@ export default function RequesterDashboard() {
   const [importer, setImporter] = useState("");
   const [article, setArticle] = useState("");
   const [arrivalDate, setArrivalDate] = useState("");
-  const [palletCount, setPalletCount] = useState("");
+  const [boxCount, setBoxCount] = useState("");
   const [comment, setComment] = useState("");
   const [feedback, setFeedback] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -85,7 +85,7 @@ export default function RequesterDashboard() {
         arrivalDate,
         importer,
         article: formatArticleCode(article),
-        palletCount: Number(palletCount),
+        boxCount: Number(boxCount),
         comment,
       });
       setFeedback({
@@ -95,7 +95,7 @@ export default function RequesterDashboard() {
       setImporter("");
       setArticle("");
       setArrivalDate("");
-      setPalletCount("");
+      setBoxCount("");
       setComment("");
     } catch (error) {
       setFeedback({
@@ -215,8 +215,8 @@ export default function RequesterDashboard() {
               <Stack spacing={1}>
                 <Typography variant="h5">Create a new import request</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Provide the request date, importer, article and pallet count to submit a
-                  complete record.
+                  Provide the request date, importer, article and box quantity (Sasia -
+                  Pako) to submit a complete record.
                 </Typography>
               </Stack>
 
@@ -262,11 +262,12 @@ export default function RequesterDashboard() {
                     fullWidth
                   />
                   <TextField
-                    label="Number of pallets"
+                    label="Box quantity (Sasia - Pako)"
                     type="number"
-                    value={palletCount}
-                    onChange={(event) => setPalletCount(event.target.value)}
-                    inputProps={{ min: 0 }}
+                    value={boxCount}
+                    onChange={(event) => setBoxCount(event.target.value)}
+                    inputProps={{ min: 1 }}
+                    helperText="We calculate palletization automatically based on the box count"
                     required
                     fullWidth
                   />

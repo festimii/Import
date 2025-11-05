@@ -25,6 +25,8 @@ import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsAct
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
 import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
 import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
+import AllInboxRoundedIcon from "@mui/icons-material/AllInboxRounded";
+import WarehouseRoundedIcon from "@mui/icons-material/WarehouseRounded";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
@@ -266,17 +268,39 @@ export default function AdminDashboard() {
           </Grid>
 
           <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
+              <StatCard
+                icon={<AllInboxRoundedIcon />}
+                label="Total boxes"
+                value={importMetricsLoading ? "…" : importMetrics?.totalBoxes ?? 0}
+                trend="Aggregate box volume across all requests"
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
               <StatCard
                 icon={<Inventory2RoundedIcon />}
                 label="Total pallets"
                 value={importMetricsLoading ? "…" : importMetrics?.totalPallets ?? 0}
-                trend="Aggregate load across every request"
+                trend="Calculated pallet positions for every request"
               />
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
               <StatCard
                 icon={<AssessmentRoundedIcon />}
+                label="Avg. boxes / request"
+                value={(() => {
+                  if (importMetricsLoading) return "…";
+                  const average = importMetrics?.averageBoxes ?? 0;
+                  if (!average) return "—";
+                  return `${average} boxes`;
+                })()}
+                trend="Typical order size submitted by requesters"
+                color="secondary"
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <StatCard
+                icon={<WarehouseRoundedIcon />}
                 label="Avg. pallets / request"
                 value={(() => {
                   if (importMetricsLoading) return "…";
@@ -285,10 +309,10 @@ export default function AdminDashboard() {
                   return `${average} pallets`;
                 })()}
                 trend="Helps plan warehouse capacity"
-                color="secondary"
+                color="info"
               />
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
               <StatCard
                 icon={<TrendingUpRoundedIcon />}
                 label="Approval ratio"
@@ -318,7 +342,7 @@ export default function AdminDashboard() {
               <Stack spacing={0.5}>
                 <Typography variant="h6">Monthly request trend</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Compare intake volume and pallet totals month over month.
+                  Compare intake volume, box totals and pallet totals month over month.
                 </Typography>
               </Stack>
 
@@ -335,6 +359,9 @@ export default function AdminDashboard() {
                         Requests
                       </TableCell>
                       <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        Boxes
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
                         Pallets
                       </TableCell>
                     </TableRow>
@@ -344,6 +371,7 @@ export default function AdminDashboard() {
                       <TableRow key={entry.month} hover>
                         <TableCell>{entry.month}</TableCell>
                         <TableCell align="right">{entry.requestCount}</TableCell>
+                        <TableCell align="right">{entry.boxTotal}</TableCell>
                         <TableCell align="right">{entry.palletTotal}</TableCell>
                       </TableRow>
                     ))}
