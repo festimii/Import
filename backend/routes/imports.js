@@ -1,5 +1,6 @@
 import express from "express";
 import { poolPromise } from "../db.js";
+import { secondaryPoolPromise } from "../db_WMS.js"; // secondary DB (pallet calculations)
 import { verifyRole } from "../middleware/auth.js";
 import {
   broadcastPushNotification,
@@ -79,7 +80,7 @@ const calculatePalletization = async (pool, { article, boxCount }) => {
     .request()
     .input("Sifra_Art", article)
     .input("Order_Boxes", boxCount)
-    .execute("sp_CalcPalletsForOrder");
+    .execute("sp_CalcPalletKPIs_ForOrder");
 
   const calculationRow = result.recordset?.[0];
   if (!calculationRow) {
@@ -130,14 +131,8 @@ const mapArticles = (records) =>
   });
 
 router.post("/", verifyRole(["requester"]), async (req, res) => {
-  const {
-    requestDate,
-    arrivalDate,
-    importer,
-    article,
-    boxCount,
-    comment,
-  } = req.body;
+  const { requestDate, arrivalDate, importer, article, boxCount, comment } =
+    req.body;
 
   if (!importer || !article || boxCount === undefined || !arrivalDate) {
     return res
@@ -190,8 +185,8 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
 
     const normalizedArticle = normalizeArticleCode(article);
 
-    const pool = await poolPromise;
-    const calculation = await calculatePalletization(pool, {
+    const secondaryPool = await secondaryPoolPromise;
+    const calculation = await calculatePalletization(secondaryPool, {
       article: normalizedArticle,
       boxCount: parsedBoxCount,
     });
@@ -334,9 +329,7 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
 router.get("/", verifyRole(["confirmer"]), async (req, res) => {
   try {
     const pool = await poolPromise;
-    const result = await pool
-      .request()
-      .query(`SELECT ID,
+    const result = await pool.request().query(`SELECT ID,
                      DataKerkeses AS RequestDate,
                      DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
@@ -381,9 +374,7 @@ router.get(
   async (req, res) => {
     try {
       const pool = await poolPromise;
-      const result = await pool
-        .request()
-        .query(`SELECT ID,
+      const result = await pool.request().query(`SELECT ID,
                      DataKerkeses AS RequestDate,
                      DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
@@ -429,8 +420,7 @@ router.get(
     try {
       const pool = await poolPromise;
 
-      const summaryResult = await pool
-        .request()
+      const summaryResult = await pool.request()
         .query(`SELECT COUNT(*) AS TotalRequests,
                        SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) AS PendingCount,
                        SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) AS ApprovedCount,
@@ -448,7 +438,9 @@ router.get(
       const totalBoxesRaw = Number(summary.TotalBoxes ?? 0);
       const totalPalletsRaw = Number(summary.TotalPallets ?? 0);
       const totalBoxes = Number.isFinite(totalBoxesRaw) ? totalBoxesRaw : 0;
-      const totalPallets = Number.isFinite(totalPalletsRaw) ? totalPalletsRaw : 0;
+      const totalPallets = Number.isFinite(totalPalletsRaw)
+        ? totalPalletsRaw
+        : 0;
       const averagePallets =
         totalRequests > 0 && totalPallets > 0
           ? Math.round((totalPallets / totalRequests) * 10) / 10
@@ -458,8 +450,7 @@ router.get(
           ? Math.round((totalBoxes / totalRequests) * 10) / 10
           : 0;
 
-      const upcomingResult = await pool
-        .request()
+      const upcomingResult = await pool.request()
         .query(`SELECT COUNT(*) AS UpcomingWeek
                 FROM ImportRequests
                 WHERE Status = 'approved'
@@ -467,10 +458,11 @@ router.get(
                   AND CAST(DataArritjes AS DATE) >= CAST(GETDATE() AS DATE)
                   AND CAST(DataArritjes AS DATE) < DATEADD(day, 7, CAST(GETDATE() AS DATE))`);
 
-      const upcomingWeek = Number(upcomingResult.recordset?.[0]?.UpcomingWeek ?? 0);
+      const upcomingWeek = Number(
+        upcomingResult.recordset?.[0]?.UpcomingWeek ?? 0
+      );
 
-      const monthlyResult = await pool
-        .request()
+      const monthlyResult = await pool.request()
         .query(`SELECT FORMAT(DataKerkeses, 'yyyy-MM') AS Month,
                        COUNT(*) AS RequestCount,
                        SUM(CAST(NumriPaletave AS INT)) AS PalletTotal,
@@ -530,14 +522,19 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       return res.status(404).json({ message: "Import request not found." });
     }
 
-    const { CurrentArrivalDate, Requester: requesterUsername, CurrentStatus } =
-      existingResult.recordset[0];
+    const {
+      CurrentArrivalDate,
+      Requester: requesterUsername,
+      CurrentStatus,
+    } = existingResult.recordset[0];
 
     let arrivalDateSqlValue;
     if (arrivalDate) {
       const arrivalDateValue = new Date(arrivalDate);
       if (Number.isNaN(arrivalDateValue.getTime())) {
-        return res.status(400).json({ message: "Invalid arrival date provided." });
+        return res
+          .status(400)
+          .json({ message: "Invalid arrival date provided." });
       }
       arrivalDateSqlValue = arrivalDateValue.toISOString().split("T")[0];
     }
