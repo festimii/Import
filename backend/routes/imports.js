@@ -1127,15 +1127,18 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         });
 
         if (created.length > 0) {
-          await broadcastPushNotification({
-            title: "📦 Import Tracker",
-            body: notification.message,
-            data: {
-              requestId: record.ID,
-              type: notification.type,
-              createdAt: new Date().toISOString(),
+          await broadcastPushNotification(
+            {
+              title: "📦 Import Tracker",
+              body: notification.message,
+              data: {
+                requestId: record.ID,
+                type: notification.type,
+                createdAt: new Date().toISOString(),
+              },
             },
-          });
+            { notifyTeams: false }
+          );
         }
       } catch (notificationError) {
         console.error(

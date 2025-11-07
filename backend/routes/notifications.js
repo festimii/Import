@@ -131,19 +131,22 @@ router.post("/create", verifyRole(allowedRoles), async (req, res) => {
       usernames: explicitAudience.length > 0 ? explicitAudience : undefined,
     });
 
-    const pushResults = await broadcastPushNotification({
-      title: "📦 Import Tracker",
-      body: Message || "A new import request requires your attention.",
-      data: {
-        requestId: RequestID,
-        type: Type || "info",
-        createdAt: new Date().toISOString(),
+    const pushResults = await broadcastPushNotification(
+      {
+        title: "📦 Import Tracker",
+        body: Message || "A new import request requires your attention.",
+        data: {
+          requestId: RequestID,
+          type: Type || "info",
+          createdAt: new Date().toISOString(),
+        },
+        actions: [
+          { action: "open", title: "Open Dashboard" },
+          { action: "dismiss", title: "Dismiss" },
+        ],
       },
-      actions: [
-        { action: "open", title: "Open Dashboard" },
-        { action: "dismiss", title: "Dismiss" },
-      ],
-    });
+      { notifyTeams: false }
+    );
 
     res.status(201).json({ notification: created, pushResults });
   } catch (err) {
