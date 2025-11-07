@@ -144,95 +144,54 @@ const mapArticles = (records) =>
     return mapped;
   });
 
-const WMS_ALLOWED_ORDER_CODE = "53";
+const mapWmsOrders = (records) =>
+  records.map((record) => {
+    const mapped = {
+      ...record,
+      NarID:
+        record.NarID !== null && record.NarID !== undefined
+          ? String(record.NarID)
+          : null,
+      OrderNumber:
+        record.OrderNumber !== null && record.OrderNumber !== undefined
+          ? String(record.OrderNumber)
+          : null,
+      Importer:
+        record.Importer !== null && record.Importer !== undefined
+          ? String(record.Importer)
+          : null,
+      Article: normalizeArticleCode(record.Article),
+      ArticleDescription:
+        record.ArticleDescription !== null &&
+        record.ArticleDescription !== undefined
+          ? String(record.ArticleDescription)
+          : null,
+      Comment:
+        record.Comment !== null && record.Comment !== undefined
+          ? String(record.Comment)
+          : null,
+    };
 
-const trimString = (value) => {
-  if (value === null || value === undefined) {
-    return null;
-  }
+    if (mapped.NarID === null) {
+      mapped.NarID = null;
+    }
 
-  const stringValue = String(value).trim();
-  return stringValue.length > 0 ? stringValue : null;
-};
+    mapped.BoxCount = numberOrNull(record.BoxCount);
+    mapped.PalletCount = numberOrNull(record.PalletCount);
 
-const parseDateValue = (value) => {
-  if (!value) return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value;
-  }
-
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-const parseBooleanFlag = (value) => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    return value !== 0;
-  }
-
-  const normalized = String(value).trim().toLowerCase();
-  if (["1", "true", "t", "yes", "y"].includes(normalized)) {
-    return true;
-  }
-  if (["0", "false", "f", "no", "n"].includes(normalized)) {
-    return false;
-  }
-
-  return null;
-};
-
-const mapRawWmsOrder = (record = {}) => {
-  const orderIdValue = Number(record.NarID);
-  const orderTypeValue = trimString(record.Sifra_Nar);
-
-  return {
-    orderId: Number.isFinite(orderIdValue) ? orderIdValue : null,
-    orderTypeCode: orderTypeValue,
-    orderNumber: trimString(record.Broj_Nar),
-    customerCode: trimString(record.Sifra_Kup),
-    orderDate: parseDateValue(record.Datum_Nar),
-    expectedDate: parseDateValue(record.Dat_Ocek),
-    customerName: trimString(record.ImeKup),
-    isRealized: trimString(record.Realiziran),
-    orderStatus: trimString(record.Stat_Nar),
-    description: trimString(record.Opis),
-    sourceReference: trimString(record.Z_KogaDosol),
-    scheduledStart: parseDateValue(record.Poc_Vreme_Zadad),
-    originalOrderNumber: trimString(record.Originalen_Broj_Naracka),
-    canProceed: parseBooleanFlag(record.Moze_Broj),
-  };
-};
-
-const mapWmsOrderResponse = (record = {}) => ({
-  id: record.ID,
-  orderId: record.OrderId,
-  orderTypeCode: record.OrderTypeCode,
-  orderNumber: record.OrderNumber,
-  customerCode: record.CustomerCode,
-  orderDate: record.OrderDate ?? null,
-  expectedDate: record.ExpectedDate ?? null,
-  customerName: record.CustomerName ?? null,
-  isRealized: record.IsRealized ?? null,
-  orderStatus: record.OrderStatus ?? null,
-  description: record.Description ?? null,
-  sourceReference: record.SourceReference ?? null,
-  scheduledStart: record.ScheduledStart ?? null,
-  originalOrderNumber: record.OriginalOrderNumber ?? null,
-  canProceed: record.CanProceed ?? null,
-  lastSyncedAt: record.LastSyncedAt ?? null,
-});
+    return mapped;
+  });
 
 router.post("/", verifyRole(["requester"]), async (req, res) => {
-  const { requestDate, arrivalDate, importer, comment, article, boxCount, items } =
-    req.body;
+  const {
+    requestDate,
+    arrivalDate,
+    importer,
+    comment,
+    article,
+    boxCount,
+    items,
+  } = req.body;
 
   if (!importer) {
     return res
@@ -354,9 +313,7 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
           throw error;
         }
 
-        const palletCount = Number.isFinite(
-          calculation.totalPalletPositions
-        )
+        const palletCount = Number.isFinite(calculation.totalPalletPositions)
           ? Math.max(0, Math.round(calculation.totalPalletPositions))
           : 0;
 
@@ -380,14 +337,8 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
             "PalletVolumeUtilization",
             calculation.palletVolumeUtilization ?? null
           )
-          .input(
-            "WeightFullPalletsKg",
-            calculation.weightFullPalletsKg ?? null
-          )
-          .input(
-            "VolumeFullPalletsM3",
-            calculation.volumeFullPalletsM3 ?? null
-          )
+          .input("WeightFullPalletsKg", calculation.weightFullPalletsKg ?? null)
+          .input("VolumeFullPalletsM3", calculation.volumeFullPalletsM3 ?? null)
           .input("WeightRemainingKg", calculation.weightRemainingKg ?? null)
           .input("VolumeRemainingM3", calculation.volumeRemainingM3 ?? null)
           .input(
@@ -508,7 +459,10 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
     ) {
       return res.status(400).json({ message: err.message });
     }
-    if (err.message === "Pallet calculation unavailable." && err.meta?.article) {
+    if (
+      err.message === "Pallet calculation unavailable." &&
+      err.meta?.article
+    ) {
       return res.status(400).json({
         message: `We couldn't calculate pallet details for article ${err.meta.article}. Please verify the article code and box quantity.`,
       });
@@ -610,6 +564,71 @@ router.get(
 );
 
 router.get(
+  "/calendar",
+  verifyRole(["admin", "confirmer", "requester"]),
+  async (req, res) => {
+    try {
+      const pool = await poolPromise;
+
+      const [confirmedResult, wmsResult] = await Promise.all([
+        pool.request().query(`SELECT ID,
+                         DataKerkeses AS RequestDate,
+                         DataArritjes AS ArrivalDate,
+                         Importuesi AS Importer,
+                         Artikulli AS Article,
+                         NumriPakove AS BoxCount,
+                         NumriPaletave AS PalletCount,
+                         BoxesPerPallet,
+                         BoxesPerLayer,
+                         LayersPerPallet,
+                         FullPallets,
+                         RemainingBoxes,
+                         PalletWeightKg,
+                         PalletVolumeM3,
+                         BoxWeightKg,
+                         BoxVolumeM3,
+                         PalletVolumeUtilization,
+                         WeightFullPalletsKg,
+                         VolumeFullPalletsM3,
+                         WeightRemainingKg,
+                         VolumeRemainingM3,
+                         TotalShipmentWeightKg,
+                         TotalShipmentVolumeM3,
+                         Comment,
+                         Useri AS Requester,
+                         Status,
+                         ConfirmedBy,
+                         CreatedAt
+                  FROM ImportRequests
+                  WHERE Status = 'approved'
+                  ORDER BY DataArritjes ASC, CreatedAt DESC`),
+        pool.request().query(`SELECT NarID,
+                         OrderNumber,
+                         Importer,
+                         Article,
+                         ArticleDescription,
+                         BoxCount,
+                         PalletCount,
+                         ArrivalDate,
+                         Comment,
+                         SourceUpdatedAt,
+                         LastSyncedAt
+                  FROM WmsOrders
+                  WHERE ArrivalDate IS NOT NULL`),
+      ]);
+
+      res.json({
+        confirmedImports: mapArticles(confirmedResult.recordset),
+        wmsOrders: mapWmsOrders(wmsResult.recordset),
+      });
+    } catch (err) {
+      console.error("Fetch calendar error:", err.message);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+router.get(
   "/metrics",
   verifyRole(["admin", "confirmer", "requester"]),
   async (req, res) => {
@@ -674,8 +693,7 @@ router.get(
         boxTotal: Number(row.BoxTotal ?? 0),
       }));
 
-      const articleGroupResult = await pool.request()
-        .query(`SELECT TOP 50
+      const articleGroupResult = await pool.request().query(`SELECT TOP 50
                        Artikulli AS Article,
                        COUNT(*) AS RequestCount,
                        SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) AS ApprovedCount,
@@ -746,7 +764,8 @@ router.post(
         }))
         .filter((entry) => Number.isInteger(entry.mapped.orderId));
 
-      const skippedMissingIdentifiers = filteredRecords.length - preparedRecords.length;
+      const skippedMissingIdentifiers =
+        filteredRecords.length - preparedRecords.length;
 
       if (preparedRecords.length === 0) {
         return res.json({
@@ -779,7 +798,11 @@ router.post(
             .input("OrderStatus", sql.NVarChar(10), mapped.orderStatus)
             .input("Description", sql.NVarChar(500), mapped.description)
             .input("SourceReference", sql.NVarChar(100), mapped.sourceReference)
-            .input("ScheduledStart", sql.DateTime2, mapped.scheduledStart ?? null)
+            .input(
+              "ScheduledStart",
+              sql.DateTime2,
+              mapped.scheduledStart ?? null
+            )
             .input(
               "OriginalOrderNumber",
               sql.NVarChar(100),

@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
 import importRoutes from "./routes/imports.js";
 import notificationRoutes from "./routes/notifications.js";
+import { startWmsOrdersSync } from "./services/wmsOrdersSync.js";
 
 dotenv.config();
 const app = express();
@@ -18,6 +19,8 @@ app.use("/api/notifications", notificationRoutes);
 
 // Default route
 app.get("/", (req, res) => res.send("✅ Import Tracker API Running"));
+
+startWmsOrdersSync();
 
 const PORT = 5000;
 app.listen(PORT, () =>
