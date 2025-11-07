@@ -33,7 +33,6 @@ import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
 import AllInboxRoundedIcon from "@mui/icons-material/AllInboxRounded";
 import WarehouseRoundedIcon from "@mui/icons-material/WarehouseRounded";
 import API from "../api";
-import formatArticleCode from "../utils/formatArticle";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
