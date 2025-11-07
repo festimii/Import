@@ -7,6 +7,7 @@ import {
   broadcastPushNotification,
   createNotifications,
 } from "../services/notifications.js";
+import { ensureWmsOrdersSchema } from "../services/wmsOrdersSync.js";
 
 const router = express.Router();
 
@@ -156,10 +157,15 @@ const mapWmsOrders = (records) =>
         record.OrderNumber !== null && record.OrderNumber !== undefined
           ? String(record.OrderNumber)
           : null,
-      Importer:
-        record.Importer !== null && record.Importer !== undefined
-          ? String(record.Importer)
-          : null,
+      Importer: (() => {
+        if (record.Importer !== null && record.Importer !== undefined) {
+          return String(record.Importer);
+        }
+        if (record.CustomerName !== null && record.CustomerName !== undefined) {
+          return String(record.CustomerName);
+        }
+        return null;
+      })(),
       Article: normalizeArticleCode(record.Article),
       ArticleDescription:
         record.ArticleDescription !== null &&
@@ -568,6 +574,7 @@ router.get(
   verifyRole(["admin", "confirmer", "requester"]),
   async (req, res) => {
     try {
+      await ensureWmsOrdersSchema();
       const pool = await poolPromise;
 
       const [confirmedResult, wmsResult] = await Promise.all([
@@ -614,7 +621,8 @@ router.get(
                          SourceUpdatedAt,
                          LastSyncedAt
                   FROM WmsOrders
-                  WHERE ArrivalDate IS NOT NULL`),
+                  WHERE ArrivalDate IS NOT NULL
+                  AND OrderTypeCode = 53`),
       ]);
 
       res.json({
@@ -740,6 +748,7 @@ router.post(
   verifyRole(["admin", "confirmer"]),
   async (req, res) => {
     try {
+      await ensureWmsOrdersSchema();
       const secondaryPool = await secondaryPoolPromise;
       const wmsResult = await secondaryPool
         .request()
@@ -932,6 +941,7 @@ router.get(
   verifyRole(["admin", "confirmer", "requester"]),
   async (req, res) => {
     try {
+      await ensureWmsOrdersSchema();
       const pool = await poolPromise;
       const result = await pool.request().query(`SELECT ID,
                      OrderId,
