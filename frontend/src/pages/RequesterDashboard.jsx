@@ -25,9 +25,8 @@ const today = () => new Date().toISOString().split("T")[0];
 export default function RequesterDashboard() {
   const currentDate = today();
   const [importer, setImporter] = useState("");
-  const [article, setArticle] = useState("");
+  const [items, setItems] = useState([{ article: "", boxCount: "" }]);
   const [arrivalDate, setArrivalDate] = useState("");
-  const [boxCount, setBoxCount] = useState("");
   const [comment, setComment] = useState("");
   const [feedback, setFeedback] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -67,6 +66,22 @@ export default function RequesterDashboard() {
     }
   };
 
+  const handleItemChange = (index, field, value) => {
+    setItems((previous) =>
+      previous.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, [field]: value } : item
+      )
+    );
+  };
+
+  const handleAddItem = () => {
+    setItems((previous) => [...previous, { article: "", boxCount: "" }]);
+  };
+
+  const handleRemoveItem = (index) => {
+    setItems((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setFeedback(null);
@@ -79,28 +94,66 @@ export default function RequesterDashboard() {
       return;
     }
 
+    const importerValue = importer.trim();
+
+    if (!importerValue) {
+      setFeedback({
+        severity: "error",
+        message: "Please provide the importer name for this order.",
+      });
+      return;
+    }
+
+    const preparedItems = [];
+
+    for (let index = 0; index < items.length; index += 1) {
+      const current = items[index];
+      const trimmedArticle = (current.article ?? "").trim();
+
+      if (!trimmedArticle) {
+        setFeedback({
+          severity: "error",
+          message: `Please provide an article code for item ${index + 1}.`,
+        });
+        return;
+      }
+
+      const parsedBoxCount = Number(current.boxCount);
+
+      if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
+        setFeedback({
+          severity: "error",
+          message: `Please provide a positive box quantity for item ${index + 1}.`,
+        });
+        return;
+      }
+
+      preparedItems.push({
+        article: formatArticleCode(trimmedArticle),
+        boxCount: parsedBoxCount,
+      });
+    }
+
     try {
       await API.post("/imports", {
         requestDate: currentDate,
         arrivalDate,
-        importer,
-        article: formatArticleCode(article),
-        boxCount: Number(boxCount),
+        importer: importerValue,
         comment,
+        items: preparedItems,
       });
       setFeedback({
         severity: "success",
-        message: "Import request submitted successfully.",
+        message: "Import order submitted successfully.",
       });
       setImporter("");
-      setArticle("");
       setArrivalDate("");
-      setBoxCount("");
+      setItems([{ article: "", boxCount: "" }]);
       setComment("");
     } catch (error) {
       setFeedback({
         severity: "error",
-        message: "Something went wrong while creating the request.",
+        message: "Something went wrong while creating the order.",
       });
     }
   };
@@ -213,10 +266,10 @@ export default function RequesterDashboard() {
           >
             <Stack spacing={4}>
               <Stack spacing={1}>
-                <Typography variant="h5">Create a new import request</Typography>
+                <Typography variant="h5">Create a new import order</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Provide the request date, importer, article and box quantity (Sasia -
-                  Pako) to submit a complete record.
+                  Provide the request date, importer and the list of article/box
+                  combinations (Sasia - Pako) to submit a complete record.
                 </Typography>
               </Stack>
 
@@ -243,15 +296,6 @@ export default function RequesterDashboard() {
                     fullWidth
                   />
                   <TextField
-                    label="Article"
-                    value={article}
-                    onChange={(event) => setArticle(event.target.value)}
-                    placeholder="Describe the article"
-                    helperText="Article codes shorter than 6 digits are padded automatically"
-                    required
-                    fullWidth
-                  />
-                  <TextField
                     label="Arrival date (Data Arritjes)"
                     type="date"
                     value={arrivalDate}
@@ -261,16 +305,75 @@ export default function RequesterDashboard() {
                     required
                     fullWidth
                   />
-                  <TextField
-                    label="Box quantity (Sasia - Pako)"
-                    type="number"
-                    value={boxCount}
-                    onChange={(event) => setBoxCount(event.target.value)}
-                    inputProps={{ min: 1 }}
-                    helperText="We calculate palletization automatically based on the box count"
-                    required
-                    fullWidth
-                  />
+                  <Stack spacing={2}>
+                    <Typography variant="subtitle1">
+                      Articles in this order
+                    </Typography>
+                    {items.map((item, index) => (
+                      <Stack
+                        key={`order-item-${index}`}
+                        spacing={2}
+                        sx={{
+                          p: 2,
+                          borderRadius: 2,
+                          border: "1px solid",
+                          borderColor: "divider",
+                          backgroundColor: "background.paper",
+                        }}
+                      >
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          justifyContent="space-between"
+                        >
+                          <Typography variant="subtitle2">
+                            Article {index + 1}
+                          </Typography>
+                          {items.length > 1 && (
+                            <Button
+                              type="button"
+                              color="error"
+                              onClick={() => handleRemoveItem(index)}
+                              size="small"
+                            >
+                              Remove
+                            </Button>
+                          )}
+                        </Stack>
+                        <TextField
+                          label="Article"
+                          value={item.article}
+                          onChange={(event) =>
+                            handleItemChange(index, "article", event.target.value)
+                          }
+                          placeholder="Describe the article"
+                          helperText="Article codes shorter than 6 digits are padded automatically"
+                          required
+                          fullWidth
+                        />
+                        <TextField
+                          label="Box quantity (Sasia - Pako)"
+                          type="number"
+                          value={item.boxCount}
+                          onChange={(event) =>
+                            handleItemChange(index, "boxCount", event.target.value)
+                          }
+                          inputProps={{ min: 1 }}
+                          helperText="We calculate palletization automatically based on the box count"
+                          required
+                          fullWidth
+                        />
+                      </Stack>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outlined"
+                      onClick={handleAddItem}
+                      sx={{ alignSelf: "flex-start" }}
+                    >
+                      Add another article
+                    </Button>
+                  </Stack>
                   <TextField
                     label="Additional context"
                     value={comment}
@@ -284,7 +387,7 @@ export default function RequesterDashboard() {
 
                   <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                     <Button type="submit" variant="contained" size="large">
-                      Submit request
+                      Submit order
                     </Button>
                   </Box>
                 </Stack>

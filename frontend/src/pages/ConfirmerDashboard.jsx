@@ -3,36 +3,43 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Container,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Grid,
+  List,
+  ListItemButton,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import API from "../api";
-import RequestCard from "../components/RequestCard";
+import RequestGroupCard from "../components/RequestGroupCard";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
+import formatArticleCode from "../utils/formatArticle";
 
 export default function ConfirmerDashboard() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState(null);
   const [proposalFeedback, setProposalFeedback] = useState(null);
-  const [proposingRequest, setProposingRequest] = useState(null);
+  const [proposingGroup, setProposingGroup] = useState(null);
   const [proposalDate, setProposalDate] = useState("");
   const [proposalSubmitting, setProposalSubmitting] = useState(false);
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -54,47 +61,126 @@ export default function ConfirmerDashboard() {
     loadRequests();
   }, []);
 
-  const handleDecision = async (id, status) => {
+  const groupedRequests = useMemo(() => {
+    const map = new Map();
+
+    const normalizeDate = (value) => {
+      if (!value) return "";
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString().split("T")[0];
+      }
+      return String(value);
+    };
+
+    for (const request of requests) {
+      const key = [
+        request.Requester ?? "",
+        request.Importer ?? "",
+        normalizeDate(request.RequestDate),
+        request.Comment ?? "",
+      ].join("|#|");
+
+      if (!map.has(key)) {
+        map.set(key, {
+          reference: request.ID,
+          importer: request.Importer,
+          requester: request.Requester,
+          requestDate: request.RequestDate,
+          items: [],
+          totalBoxes: 0,
+          totalPallets: 0,
+          comments: [],
+          sharedArrivalDate: null,
+          arrivalDateConflict: false,
+        });
+      }
+
+      const group = map.get(key);
+      group.items.push(request);
+
+      const boxes = Number(request.BoxCount);
+      if (Number.isFinite(boxes)) {
+        group.totalBoxes += boxes;
+      }
+
+      const pallets = Number(request.PalletCount);
+      if (Number.isFinite(pallets)) {
+        group.totalPallets += pallets;
+      }
+
+      const trimmedComment = (request.Comment || "").trim();
+      if (trimmedComment && !group.comments.includes(trimmedComment)) {
+        group.comments.push(trimmedComment);
+      }
+
+      if (!group.sharedArrivalDate && request.ArrivalDate) {
+        group.sharedArrivalDate = request.ArrivalDate;
+      } else if (
+        group.sharedArrivalDate &&
+        request.ArrivalDate &&
+        new Date(group.sharedArrivalDate).getTime() !==
+          new Date(request.ArrivalDate).getTime()
+      ) {
+        group.sharedArrivalDate = null;
+        group.arrivalDateConflict = true;
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const dateA = a.requestDate ? new Date(a.requestDate).getTime() : 0;
+      const dateB = b.requestDate ? new Date(b.requestDate).getTime() : 0;
+      return dateB - dateA;
+    });
+  }, [requests]);
+
+  const handleGroupDecision = async (group, status) => {
     setFeedback(null);
     try {
-      await API.patch(`/imports/${id}`, { status });
+      await Promise.all(
+        group.items.map((item) => API.patch(`/imports/${item.ID}`, { status }))
+      );
+      const action = status === "approved" ? "Approved" : "Rejected";
       setFeedback({
         severity: "success",
-        message: `Request ${status === "approved" ? "approved" : "rejected"}.`,
+        message: `${action} ${group.items.length} article${
+          group.items.length === 1 ? "" : "s"
+        } for ${group.importer}.`,
       });
     } catch (error) {
       setFeedback({
         severity: "error",
-        message: "Updating the request failed. Please try again.",
+        message: "Updating the request group failed. Please try again.",
       });
     } finally {
       loadRequests();
     }
   };
 
-  const handleOpenProposal = (request) => {
+  const handleOpenProposal = (group) => {
     const defaultDate = (() => {
-      if (!request.ArrivalDate) return "";
-      const parsed = new Date(request.ArrivalDate);
-      if (Number.isNaN(parsed.getTime())) {
-        return "";
+      if (group.sharedArrivalDate) {
+        const parsed = new Date(group.sharedArrivalDate);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed.toISOString().split("T")[0];
+        }
       }
-      return parsed.toISOString().split("T")[0];
+      return "";
     })();
 
     setProposalFeedback(null);
-    setProposingRequest(request);
+    setProposingGroup(group);
     setProposalDate(defaultDate);
   };
 
   const handleCloseProposal = () => {
-    setProposingRequest(null);
+    setProposingGroup(null);
     setProposalDate("");
     setProposalFeedback(null);
   };
 
   const handleSubmitProposal = async () => {
-    if (!proposingRequest) return;
+    if (!proposingGroup) return;
     if (!proposalDate) {
       setProposalFeedback({
         severity: "error",
@@ -107,12 +193,16 @@ export default function ConfirmerDashboard() {
     setProposalFeedback(null);
     let shouldClose = false;
     try {
-      await API.patch(`/imports/${proposingRequest.ID}`, {
-        arrivalDate: proposalDate,
-      });
+      await Promise.all(
+        proposingGroup.items.map((item) =>
+          API.patch(`/imports/${item.ID}`, { arrivalDate: proposalDate })
+        )
+      );
       setFeedback({
         severity: "success",
-        message: `${proposingRequest.Requester ?? "The requester"} has been notified about the new arrival date.`,
+        message: `Notified requester${
+          proposingGroup.items.length > 1 ? "s" : ""
+        } about the new arrival date.`,
       });
       shouldClose = true;
     } catch (error) {
@@ -134,7 +224,7 @@ export default function ConfirmerDashboard() {
     window.location.reload();
   };
 
-  const pendingCount = requests.length;
+  const pendingCount = groupedRequests.length;
   const averageLoad = useMemo(() => {
     if (pendingCount === 0) return "—";
 
@@ -169,7 +259,10 @@ export default function ConfirmerDashboard() {
       averages.push(boxAverage);
     }
 
-    const palletAverage = formatAverage(totals.pallets / pendingCount, "pallets");
+    const palletAverage = formatAverage(
+      totals.pallets / pendingCount,
+      "pallets"
+    );
     if (palletAverage) {
       averages.push(palletAverage);
     }
@@ -181,10 +274,18 @@ export default function ConfirmerDashboard() {
     return averages.join(" • ");
   }, [pendingCount, requests]);
 
-  const awaitingSchedule = useMemo(
-    () => requests.filter((request) => !request.ArrivalDate).length,
-    [requests]
-  );
+  const awaitingSchedule = useMemo(() => {
+    if (groupedRequests.length === 0) return 0;
+    return groupedRequests.filter((group) => {
+      if (group.arrivalDateConflict) {
+        return true;
+      }
+      if (!group.sharedArrivalDate) {
+        return true;
+      }
+      return false;
+    }).length;
+  }, [groupedRequests]);
 
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
@@ -212,8 +313,8 @@ export default function ConfirmerDashboard() {
               Daily reminder
             </Typography>
             <Typography variant="body1">
-              Prioritize requests with upcoming arrivals and communicate any schedule
-              changes promptly.
+              Prioritize requests with upcoming arrivals and communicate any
+              schedule changes promptly.
             </Typography>
           </Stack>
         </Paper>
@@ -222,7 +323,9 @@ export default function ConfirmerDashboard() {
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
           <NotificationPermissionBanner />
-          {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+          {feedback && (
+            <Alert severity={feedback.severity}>{feedback.message}</Alert>
+          )}
 
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
@@ -230,7 +333,7 @@ export default function ConfirmerDashboard() {
                 icon={<AssignmentTurnedInRoundedIcon />}
                 label="Pending decisions"
                 value={loading ? "…" : pendingCount}
-                trend="Approve or reject requests to keep freight moving"
+                trend="Approve or reject grouped requests to keep freight moving"
               />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -238,7 +341,7 @@ export default function ConfirmerDashboard() {
                 icon={<Inventory2RoundedIcon />}
                 label="Average load"
                 value={loading ? "…" : averageLoad}
-                trend="Average boxes and pallets per pending request"
+                trend="Average boxes and pallets per pending bill"
                 color="secondary"
               />
             </Grid>
@@ -266,23 +369,35 @@ export default function ConfirmerDashboard() {
             >
               <CircularProgress color="primary" />
             </Paper>
-          ) : requests.length === 0 ? (
-            <Paper elevation={4} sx={{ p: { xs: 4, md: 6 }, textAlign: "center" }}>
+          ) : groupedRequests.length === 0 ? (
+            <Paper
+              elevation={4}
+              sx={{ p: { xs: 4, md: 6 }, textAlign: "center" }}
+            >
               <Typography variant="h6" gutterBottom>
                 You're all caught up
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                There are no pending requests right now. You'll be notified when new
-                submissions arrive.
+                There are no pending request bills right now. You'll be notified
+                when new submissions arrive.
               </Typography>
             </Paper>
           ) : (
             <Grid container spacing={3}>
-              {requests.map((request) => (
-                <Grid item xs={12} md={6} key={request.ID}>
-                  <RequestCard
-                    req={request}
-                    onDecision={handleDecision}
+              {groupedRequests.map((group) => (
+                <Grid
+                  item
+                  xs={12}
+                  key={`${group.reference}-${group.items.length}`}
+                >
+                  <RequestGroupCard
+                    group={group}
+                    onApprove={(selectedGroup) =>
+                      handleGroupDecision(selectedGroup, "approved")
+                    }
+                    onReject={(selectedGroup) =>
+                      handleGroupDecision(selectedGroup, "rejected")
+                    }
                     onProposeDate={handleOpenProposal}
                   />
                 </Grid>
@@ -298,7 +413,7 @@ export default function ConfirmerDashboard() {
       </Container>
 
       <Dialog
-        open={Boolean(proposingRequest)}
+        open={Boolean(proposingGroup)}
         onClose={proposalSubmitting ? undefined : handleCloseProposal}
         fullWidth
         maxWidth="sm"
@@ -306,17 +421,25 @@ export default function ConfirmerDashboard() {
         <DialogTitle>Propose a new arrival date</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2}>
-            {proposingRequest && (
+            {proposingGroup && (
               <Typography variant="body2" color="text.secondary">
-                Update the arrival date for request #{proposingRequest.ID} from {" "}
-                <Typography component="span" fontWeight={600} color="text.primary">
-                  {proposingRequest.Importer}
+                Update the arrival date for {proposingGroup.items.length}{" "}
+                article
+                {proposingGroup.items.length === 1 ? "" : "s"} requested by{" "}
+                <Typography
+                  component="span"
+                  fontWeight={600}
+                  color="text.primary"
+                >
+                  {proposingGroup.importer}
                 </Typography>
                 . The requester will be notified once you confirm the change.
               </Typography>
             )}
             {proposalFeedback && (
-              <Alert severity={proposalFeedback.severity}>{proposalFeedback.message}</Alert>
+              <Alert severity={proposalFeedback.severity}>
+                {proposalFeedback.message}
+              </Alert>
             )}
             <TextField
               label="New arrival date"
@@ -335,9 +458,10 @@ export default function ConfirmerDashboard() {
           <Button
             onClick={handleSubmitProposal}
             variant="contained"
+            color="secondary"
             disabled={proposalSubmitting}
           >
-            {proposalSubmitting ? "Updating..." : "Confirm change"}
+            {proposalSubmitting ? "Saving…" : "Save"}
           </Button>
         </DialogActions>
       </Dialog>

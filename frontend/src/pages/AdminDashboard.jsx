@@ -5,6 +5,11 @@ import {
   Button,
   CircularProgress,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
   Grid,
   Paper,
   Stack,
@@ -28,11 +33,13 @@ import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
 import AllInboxRoundedIcon from "@mui/icons-material/AllInboxRounded";
 import WarehouseRoundedIcon from "@mui/icons-material/WarehouseRounded";
 import API from "../api";
+import formatArticleCode from "../utils/formatArticle";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
+import formatArticleCode from "../utils/formatArticle";
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
@@ -43,6 +50,10 @@ export default function AdminDashboard() {
   const [importMetrics, setImportMetrics] = useState(null);
   const [importMetricsLoading, setImportMetricsLoading] = useState(true);
   const [importMetricsFeedback, setImportMetricsFeedback] = useState(null);
+  const [approvedRequests, setApprovedRequests] = useState([]);
+  const [approvedLoading, setApprovedLoading] = useState(true);
+  const [approvedFeedback, setApprovedFeedback] = useState(null);
+  const [selectedImport, setSelectedImport] = useState(null);
 
   const loadImportMetrics = async () => {
     setImportMetricsLoading(true);
@@ -57,6 +68,27 @@ export default function AdminDashboard() {
       });
     } finally {
       setImportMetricsLoading(false);
+    }
+  };
+
+  const loadApprovedRequests = async () => {
+    setApprovedLoading(true);
+    setApprovedFeedback(null);
+    try {
+      const res = await API.get("/imports/confirmed");
+      const sorted = [...res.data].sort((a, b) => {
+        const dateA = a.ArrivalDate ? new Date(a.ArrivalDate).getTime() : 0;
+        const dateB = b.ArrivalDate ? new Date(b.ArrivalDate).getTime() : 0;
+        return dateB - dateA;
+      });
+      setApprovedRequests(sorted);
+    } catch (error) {
+      setApprovedFeedback({
+        severity: "error",
+        message: "Unable to load confirmed import details right now.",
+      });
+    } finally {
+      setApprovedLoading(false);
     }
   };
 
@@ -79,6 +111,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadUsers();
     loadImportMetrics();
+    loadApprovedRequests();
   }, []);
 
   useEffect(() => {
@@ -112,7 +145,9 @@ export default function AdminDashboard() {
     } catch (error) {
       setUsers((prev) =>
         prev.map((user) =>
-          user.Username === username ? { ...user, Role: currentUser.Role } : user
+          user.Username === username
+            ? { ...user, Role: currentUser.Role }
+            : user
         )
       );
       setUserFeedback({
@@ -127,6 +162,28 @@ export default function AdminDashboard() {
   const logout = () => {
     localStorage.clear();
     window.location.reload();
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "—";
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString();
+    }
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+    return "—";
+  };
+
+  const formatQuantity = (value, fractionDigits = 0) => {
+    if (value === null || value === undefined) return "—";
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return "—";
+    return numericValue.toLocaleString(undefined, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    });
   };
 
   const handleOpenUserDialog = () => {
@@ -157,6 +214,13 @@ export default function AdminDashboard() {
     };
   }, [users]);
 
+  const formatNumber = (value) => {
+    if (value === null || value === undefined) return "—";
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "—";
+    return numeric.toLocaleString();
+  };
+
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <PageHero
@@ -164,7 +228,11 @@ export default function AdminDashboard() {
         subtitle="Track approved import requests, anticipate arrivals and curate role-based access for every collaborator."
         actions={
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-            <Button variant="outlined" color="inherit" onClick={handleOpenUserDialog}>
+            <Button
+              variant="outlined"
+              color="inherit"
+              onClick={handleOpenUserDialog}
+            >
               Manage users
             </Button>
             <Button variant="contained" color="secondary" onClick={logout}>
@@ -178,8 +246,8 @@ export default function AdminDashboard() {
             Governance snapshot
           </Typography>
           <Typography variant="body1">
-            Keep access aligned with responsibilities and consult the shared arrival
-            calendar to inform stakeholders.
+            Keep access aligned with responsibilities and consult the shared
+            arrival calendar to inform stakeholders.
           </Typography>
         </Stack>
       </PageHero>
@@ -219,7 +287,8 @@ export default function AdminDashboard() {
           <Stack spacing={1}>
             <Typography variant="h6">Import operations snapshot</Typography>
             <Typography variant="body2" color="text.secondary">
-              Track request volume, approvals and near-term arrivals at a glance.
+              Track request volume, approvals and near-term arrivals at a
+              glance.
             </Typography>
           </Stack>
 
@@ -234,7 +303,9 @@ export default function AdminDashboard() {
               <StatCard
                 icon={<ChecklistRoundedIcon />}
                 label="Total requests"
-                value={importMetricsLoading ? "…" : importMetrics?.totalRequests ?? 0}
+                value={
+                  importMetricsLoading ? "…" : importMetrics?.totalRequests ?? 0
+                }
                 trend="All submissions recorded in the system"
               />
             </Grid>
@@ -242,7 +313,9 @@ export default function AdminDashboard() {
               <StatCard
                 icon={<EventAvailableRoundedIcon />}
                 label="Approved"
-                value={importMetricsLoading ? "…" : importMetrics?.approvedCount ?? 0}
+                value={
+                  importMetricsLoading ? "…" : importMetrics?.approvedCount ?? 0
+                }
                 trend="Confirmed arrivals awaiting execution"
                 color="secondary"
               />
@@ -251,7 +324,9 @@ export default function AdminDashboard() {
               <StatCard
                 icon={<ScheduleRoundedIcon />}
                 label="Pending"
-                value={importMetricsLoading ? "…" : importMetrics?.pendingCount ?? 0}
+                value={
+                  importMetricsLoading ? "…" : importMetrics?.pendingCount ?? 0
+                }
                 trend="Requests still waiting on a decision"
                 color="info"
               />
@@ -260,7 +335,9 @@ export default function AdminDashboard() {
               <StatCard
                 icon={<NotificationsActiveRoundedIcon />}
                 label="Arrivals this week"
-                value={importMetricsLoading ? "…" : importMetrics?.upcomingWeek ?? 0}
+                value={
+                  importMetricsLoading ? "…" : importMetrics?.upcomingWeek ?? 0
+                }
                 trend="Approved deliveries in the next seven days"
                 color="warning"
               />
@@ -272,7 +349,9 @@ export default function AdminDashboard() {
               <StatCard
                 icon={<AllInboxRoundedIcon />}
                 label="Total boxes"
-                value={importMetricsLoading ? "…" : importMetrics?.totalBoxes ?? 0}
+                value={
+                  importMetricsLoading ? "…" : importMetrics?.totalBoxes ?? 0
+                }
                 trend="Aggregate box volume across all requests"
               />
             </Grid>
@@ -280,7 +359,9 @@ export default function AdminDashboard() {
               <StatCard
                 icon={<Inventory2RoundedIcon />}
                 label="Total pallets"
-                value={importMetricsLoading ? "…" : importMetrics?.totalPallets ?? 0}
+                value={
+                  importMetricsLoading ? "…" : importMetrics?.totalPallets ?? 0
+                }
                 trend="Calculated pallet positions for every request"
               />
             </Grid>
@@ -342,7 +423,8 @@ export default function AdminDashboard() {
               <Stack spacing={0.5}>
                 <Typography variant="h6">Monthly request trend</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Compare intake volume, box totals and pallet totals month over month.
+                  Compare intake volume, box totals and pallet totals month over
+                  month.
                 </Typography>
               </Stack>
 
@@ -370,7 +452,9 @@ export default function AdminDashboard() {
                     {importMetrics.monthlyRequests.map((entry) => (
                       <TableRow key={entry.month} hover>
                         <TableCell>{entry.month}</TableCell>
-                        <TableCell align="right">{entry.requestCount}</TableCell>
+                        <TableCell align="right">
+                          {entry.requestCount}
+                        </TableCell>
                         <TableCell align="right">{entry.boxTotal}</TableCell>
                         <TableCell align="right">{entry.palletTotal}</TableCell>
                       </TableRow>
@@ -379,16 +463,236 @@ export default function AdminDashboard() {
                 </Table>
               ) : (
                 <Typography variant="body2" color="text.secondary">
-                  No historical data available yet. New submissions will populate this
-                  view automatically.
+                  No historical data available yet. New submissions will
+                  populate this view automatically.
                 </Typography>
               )}
             </Stack>
           </Paper>
 
+          <Paper
+            elevation={10}
+            sx={{
+              p: { xs: 3, md: 5 },
+              borderRadius: 4,
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+            }}
+          >
+            <Stack spacing={0.5}>
+              <Typography variant="h6">Confirmed import registry</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Review approved requests in detail and reopen the record when
+                you need the underlying article breakdown.
+              </Typography>
+            </Stack>
+
+            {approvedFeedback && (
+              <Alert severity={approvedFeedback.severity}>
+                {approvedFeedback.message}
+              </Alert>
+            )}
+
+            {approvedLoading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                <CircularProgress color="primary" />
+              </Box>
+            ) : approvedRequests.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No confirmed imports are available yet. As confirmers approve
+                requests, they will appear in this registry automatically.
+              </Typography>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600 }}>Request</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Importer</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Article</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Boxes
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Pallets
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Arrival date
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Details
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {approvedRequests.map((request) => (
+                    <TableRow key={request.ID} hover>
+                      <TableCell>#{request.ID}</TableCell>
+                      <TableCell>{request.Importer}</TableCell>
+                      <TableCell>
+                        {formatArticleCode(request.Article)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatQuantity(request.BoxCount)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatQuantity(request.PalletCount)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatDate(request.ArrivalDate)}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          onClick={() => setSelectedImport(request)}
+                        >
+                          View
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </Paper>
+
           <CalendarOverview description="Review confirmed import requests and prepare for upcoming arrivals." />
         </Stack>
       </Container>
+      <Dialog
+        open={Boolean(selectedImport)}
+        onClose={() => setSelectedImport(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>
+          {selectedImport
+            ? `Import request #${selectedImport.ID}`
+            : "Import details"}
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedImport ? (
+            <Stack spacing={2}>
+              <Stack spacing={0.5}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Importer
+                </Typography>
+                <Typography variant="body1">
+                  {selectedImport.Importer}
+                </Typography>
+              </Stack>
+              <Divider />
+              <Stack
+                spacing={0.5}
+                direction={{ xs: "column", sm: "row" }}
+                gap={{ sm: 6 }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Article
+                  </Typography>
+                  <Typography variant="body1">
+                    {formatArticleCode(selectedImport.Article)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Status
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {selectedImport.Status ?? "approved"}
+                  </Typography>
+                </Box>
+              </Stack>
+              <Divider />
+              <Stack
+                spacing={0.5}
+                direction={{ xs: "column", sm: "row" }}
+                gap={{ sm: 6 }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Request date
+                  </Typography>
+                  <Typography variant="body1">
+                    {formatDate(selectedImport.RequestDate)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Arrival date
+                  </Typography>
+                  <Typography variant="body1">
+                    {formatDate(selectedImport.ArrivalDate)}
+                  </Typography>
+                </Box>
+              </Stack>
+              <Divider />
+              <Stack
+                spacing={0.5}
+                direction={{ xs: "column", sm: "row" }}
+                gap={{ sm: 6 }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Box quantity
+                  </Typography>
+                  <Typography variant="body1">
+                    {formatQuantity(selectedImport.BoxCount)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Pallet positions
+                  </Typography>
+                  <Typography variant="body1">
+                    {formatQuantity(selectedImport.PalletCount)}
+                  </Typography>
+                </Box>
+              </Stack>
+              {(selectedImport.Comment || "").trim() && (
+                <>
+                  <Divider />
+                  <Stack spacing={0.5}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Requester note
+                    </Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                      {selectedImport.Comment}
+                    </Typography>
+                  </Stack>
+                </>
+              )}
+              <Divider />
+              <Stack
+                spacing={0.5}
+                direction={{ xs: "column", sm: "row" }}
+                gap={{ sm: 6 }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Requested by
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {selectedImport.Requester ?? "—"}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Confirmed by
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {selectedImport.ConfirmedBy ?? "—"}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSelectedImport(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
       <UserManagementDialog
         open={isUserDialogOpen}
         onClose={handleCloseUserDialog}

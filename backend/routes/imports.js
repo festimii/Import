@@ -1,4 +1,5 @@
 import express from "express";
+import sql from "mssql";
 import { poolPromise } from "../db.js";
 import { secondaryPoolPromise } from "../db_WMS.js"; // secondary DB (pallet calculations)
 import { verifyRole } from "../middleware/auth.js";
@@ -34,6 +35,19 @@ const numberOrNull = (value) => {
   }
 
   return null;
+};
+
+const sanitizeComment = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+  if (stringValue.length === 0) {
+    return null;
+  }
+
+  return stringValue.slice(0, 1000);
 };
 
 const normalizePalletCalculation = (row = {}) => {
@@ -79,7 +93,7 @@ const calculatePalletization = async (pool, { article, boxCount }) => {
   const result = await pool
     .request()
     .input("Sifra_Art", article)
-    .input("Order_Boxes", boxCount)
+    .input("OrderBoxes", boxCount)
     .execute("sp_CalcPalletKPIs_ForOrder");
 
   const calculationRow = result.recordset?.[0];
@@ -131,37 +145,82 @@ const mapArticles = (records) =>
   });
 
 router.post("/", verifyRole(["requester"]), async (req, res) => {
-  const { requestDate, arrivalDate, importer, article, boxCount, comment } =
+  const { requestDate, arrivalDate, importer, comment, article, boxCount, items } =
     req.body;
 
-  if (!importer || !article || boxCount === undefined || !arrivalDate) {
+  if (!importer) {
     return res
       .status(400)
-      .json({ message: "Missing required fields for import request." });
+      .json({ message: "Importer is required to create an import order." });
   }
 
-  const parsedBoxCount = Number(boxCount);
-
-  if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
+  if (!arrivalDate) {
     return res
       .status(400)
-      .json({ message: "Box count must be a positive number." });
+      .json({ message: "An arrival date is required for the import order." });
+  }
+
+  const rawItems = (() => {
+    if (Array.isArray(items) && items.length > 0) {
+      return items.filter((item) => item !== null && item !== undefined);
+    }
+
+    if (article !== undefined || boxCount !== undefined) {
+      return [
+        {
+          article,
+          boxCount,
+          comment,
+        },
+      ];
+    }
+
+    return [];
+  })();
+
+  if (rawItems.length === 0) {
+    return res.status(400).json({
+      message: "At least one article is required for the import order.",
+    });
+  }
+
+  const sanitizedDefaultComment = sanitizeComment(comment);
+
+  const normalizedItems = [];
+
+  for (let index = 0; index < rawItems.length; index += 1) {
+    const current = rawItems[index] ?? {};
+    const articleValue =
+      current.article ?? current.Artikulli ?? current.Article ?? "";
+    const articleString = String(articleValue).trim();
+
+    if (!articleString) {
+      return res.status(400).json({
+        message: `Article is required for item ${index + 1}.`,
+      });
+    }
+
+    const normalizedArticle = normalizeArticleCode(articleString);
+    const boxValue =
+      current.boxCount ?? current.NumriPakove ?? current.Boxes ?? null;
+    const parsedBoxCount = Number(boxValue);
+
+    if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
+      return res.status(400).json({
+        message: `Box count for item ${index + 1} must be a positive number.`,
+      });
+    }
+
+    const sanitizedItemComment = sanitizeComment(current.comment);
+
+    normalizedItems.push({
+      article: normalizedArticle,
+      boxCount: parsedBoxCount,
+      comment: sanitizedItemComment ?? sanitizedDefaultComment,
+    });
   }
 
   try {
-    const sanitizedComment = (() => {
-      if (comment === null || comment === undefined) {
-        return null;
-      }
-
-      const stringValue = String(comment).trim();
-      if (stringValue.length === 0) {
-        return null;
-      }
-
-      return stringValue.slice(0, 1000);
-    })();
-
     const requestDateValue = (() => {
       if (!requestDate) return new Date();
 
@@ -183,49 +242,80 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
     const requestDateSqlValue = requestDateValue.toISOString().split("T")[0];
     const arrivalDateSqlValue = arrivalDateValue.toISOString().split("T")[0];
 
-    const normalizedArticle = normalizeArticleCode(article);
-
+    const pool = await poolPromise;
     const secondaryPool = await secondaryPoolPromise;
-    const calculation = await calculatePalletization(secondaryPool, {
-      article: normalizedArticle,
-      boxCount: parsedBoxCount,
-    });
+    const transaction = new sql.Transaction(pool);
 
-    const palletCount = Number.isFinite(calculation.totalPalletPositions)
-      ? Math.max(0, Math.round(calculation.totalPalletPositions))
-      : 0;
+    await transaction.begin();
 
-    const request = pool
-      .request()
-      .input("DataKerkeses", requestDateSqlValue)
-      .input("DataArritjes", arrivalDateSqlValue)
-      .input("Importuesi", importer)
-      .input("Artikulli", normalizedArticle)
-      .input("NumriPakove", parsedBoxCount)
-      .input("NumriPaletave", palletCount)
-      .input("BoxesPerPallet", calculation.boxesPerPallet ?? null)
-      .input("BoxesPerLayer", calculation.boxesPerLayer ?? null)
-      .input("LayersPerPallet", calculation.layersPerPallet ?? null)
-      .input("FullPallets", calculation.fullPallets ?? null)
-      .input("RemainingBoxes", calculation.remainingBoxes ?? null)
-      .input("PalletWeightKg", calculation.palletWeightKg ?? null)
-      .input("PalletVolumeM3", calculation.palletVolumeM3 ?? null)
-      .input("BoxWeightKg", calculation.boxWeightKg ?? null)
-      .input("BoxVolumeM3", calculation.boxVolumeM3 ?? null)
-      .input(
-        "PalletVolumeUtilization",
-        calculation.palletVolumeUtilization ?? null
-      )
-      .input("WeightFullPalletsKg", calculation.weightFullPalletsKg ?? null)
-      .input("VolumeFullPalletsM3", calculation.volumeFullPalletsM3 ?? null)
-      .input("WeightRemainingKg", calculation.weightRemainingKg ?? null)
-      .input("VolumeRemainingM3", calculation.volumeRemainingM3 ?? null)
-      .input("TotalShipmentWeightKg", calculation.totalShipmentWeightKg ?? null)
-      .input("TotalShipmentVolumeM3", calculation.totalShipmentVolumeM3 ?? null)
-      .input("Comment", sanitizedComment)
-      .input("Useri", req.user.username);
+    const insertedRecords = [];
 
-    const result = await request.query(`INSERT INTO ImportRequests (
+    try {
+      for (let index = 0; index < normalizedItems.length; index += 1) {
+        const current = normalizedItems[index];
+
+        let calculation;
+        try {
+          calculation = await calculatePalletization(secondaryPool, {
+            article: current.article,
+            boxCount: current.boxCount,
+          });
+        } catch (error) {
+          error.meta = {
+            article: current.article,
+            itemIndex: index + 1,
+          };
+          throw error;
+        }
+
+        const palletCount = Number.isFinite(
+          calculation.totalPalletPositions
+        )
+          ? Math.max(0, Math.round(calculation.totalPalletPositions))
+          : 0;
+
+        const request = new sql.Request(transaction)
+          .input("DataKerkeses", requestDateSqlValue)
+          .input("DataArritjes", arrivalDateSqlValue)
+          .input("Importuesi", importer)
+          .input("Artikulli", current.article)
+          .input("NumriPakove", current.boxCount)
+          .input("NumriPaletave", palletCount)
+          .input("BoxesPerPallet", calculation.boxesPerPallet ?? null)
+          .input("BoxesPerLayer", calculation.boxesPerLayer ?? null)
+          .input("LayersPerPallet", calculation.layersPerPallet ?? null)
+          .input("FullPallets", calculation.fullPallets ?? null)
+          .input("RemainingBoxes", calculation.remainingBoxes ?? null)
+          .input("PalletWeightKg", calculation.palletWeightKg ?? null)
+          .input("PalletVolumeM3", calculation.palletVolumeM3 ?? null)
+          .input("BoxWeightKg", calculation.boxWeightKg ?? null)
+          .input("BoxVolumeM3", calculation.boxVolumeM3 ?? null)
+          .input(
+            "PalletVolumeUtilization",
+            calculation.palletVolumeUtilization ?? null
+          )
+          .input(
+            "WeightFullPalletsKg",
+            calculation.weightFullPalletsKg ?? null
+          )
+          .input(
+            "VolumeFullPalletsM3",
+            calculation.volumeFullPalletsM3 ?? null
+          )
+          .input("WeightRemainingKg", calculation.weightRemainingKg ?? null)
+          .input("VolumeRemainingM3", calculation.volumeRemainingM3 ?? null)
+          .input(
+            "TotalShipmentWeightKg",
+            calculation.totalShipmentWeightKg ?? null
+          )
+          .input(
+            "TotalShipmentVolumeM3",
+            calculation.totalShipmentVolumeM3 ?? null
+          )
+          .input("Comment", current.comment)
+          .input("Useri", req.user.username);
+
+        const result = await request.query(`INSERT INTO ImportRequests (
                 DataKerkeses,
                 DataArritjes,
                 Importuesi,
@@ -305,26 +395,46 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
                 @Useri,
                 @Comment
               )`);
-    const [record] = mapArticles(result.recordset);
-    res.json(record);
+        const [record] = mapArticles(result.recordset);
+        insertedRecords.push(record);
+      }
+
+      await transaction.commit();
+    } catch (transactionError) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error("Rollback error:", rollbackError.message);
+      }
+
+      throw transactionError;
+    }
+
+    const responsePayload =
+      insertedRecords.length === 1 ? insertedRecords[0] : insertedRecords;
+
+    res.json(responsePayload);
   } catch (err) {
-    console.error("Create error:", err.message);
+    console.error("Create error:", err);
     if (
       err.message === "Invalid request date provided." ||
       err.message === "Invalid arrival date provided."
     ) {
       return res.status(400).json({ message: err.message });
     }
-    if (err.message === "Pallet calculation unavailable.") {
+    if (err.message === "Pallet calculation unavailable." && err.meta?.article) {
       return res.status(400).json({
-        message:
-          "We couldn't calculate pallet details for this article. Please verify the article code and box quantity.",
+        message: `We couldn't calculate pallet details for article ${err.meta.article}. Please verify the article code and box quantity.`,
+      });
+    }
+    if (err.meta?.article) {
+      return res.status(400).json({
+        message: `We couldn't calculate pallet details for article ${err.meta.article}. Please verify the article code and box quantity.`,
       });
     }
     res.status(500).json({ message: "Server error" });
   }
 });
-
 // ---------- GET PENDING REQUESTS (Confirmer) ----------
 router.get("/", verifyRole(["confirmer"]), async (req, res) => {
   try {
@@ -478,6 +588,29 @@ router.get(
         boxTotal: Number(row.BoxTotal ?? 0),
       }));
 
+      const articleGroupResult = await pool.request()
+        .query(`SELECT TOP 50
+                       Artikulli AS Article,
+                       COUNT(*) AS RequestCount,
+                       SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+                       SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) AS PendingCount,
+                       SUM(CASE WHEN Status = 'rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+                       SUM(CAST(NumriPakove AS INT)) AS BoxTotal,
+                       SUM(CAST(NumriPaletave AS INT)) AS PalletTotal
+                FROM ImportRequests
+                GROUP BY Artikulli
+                ORDER BY COUNT(*) DESC, Artikulli ASC`);
+
+      const articleGroups = articleGroupResult.recordset.map((row) => ({
+        article: normalizeArticleCode(row.Article),
+        requestCount: Number(row.RequestCount ?? 0),
+        approvedCount: Number(row.ApprovedCount ?? 0),
+        pendingCount: Number(row.PendingCount ?? 0),
+        rejectedCount: Number(row.RejectedCount ?? 0),
+        boxTotal: Number(row.BoxTotal ?? 0),
+        palletTotal: Number(row.PalletTotal ?? 0),
+      }));
+
       res.json({
         totalRequests,
         pendingCount,
@@ -489,6 +622,7 @@ router.get(
         averageBoxes,
         upcomingWeek,
         monthlyRequests,
+        articleGroups,
       });
     } catch (err) {
       console.error("Metrics fetch error:", err.message);
