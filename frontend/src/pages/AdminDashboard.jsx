@@ -3,12 +3,10 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
+  Collapse,
   Container,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Divider,
   Grid,
   Paper,
@@ -52,7 +50,7 @@ export default function AdminDashboard() {
   const [approvedRequests, setApprovedRequests] = useState([]);
   const [approvedLoading, setApprovedLoading] = useState(true);
   const [approvedFeedback, setApprovedFeedback] = useState(null);
-  const [selectedImport, setSelectedImport] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState({});
 
   const loadImportMetrics = async () => {
     setImportMetricsLoading(true);
@@ -195,6 +193,13 @@ export default function AdminDashboard() {
     setUserFeedback(null);
   };
 
+  const toggleGroup = (groupId) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupId]: !prev[groupId],
+    }));
+  };
+
   const { totalUsers, confirmerCount, requesterCount } = useMemo(() => {
     const total = users.length;
     const counts = users.reduce(
@@ -218,6 +223,177 @@ export default function AdminDashboard() {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return "—";
     return numeric.toLocaleString();
+  };
+
+  const approvedGroups = useMemo(() => {
+    if (!approvedRequests.length) return [];
+
+    const map = new Map();
+
+    const normalizeDate = (value) => {
+      if (!value) return "";
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString().split("T")[0];
+      }
+      return String(value);
+    };
+
+    for (const request of approvedRequests) {
+      const key = [
+        request.Requester ?? "",
+        request.Importer ?? "",
+        normalizeDate(request.RequestDate),
+        (request.Comment ?? "").trim(),
+      ].join("|#|");
+
+      if (!map.has(key)) {
+        map.set(key, {
+          id: key,
+          reference: request.ID,
+          importer: request.Importer,
+          requester: request.Requester,
+          requestDate: request.RequestDate,
+          items: [],
+          totalBoxes: 0,
+          totalPallets: 0,
+          totalFullPallets: 0,
+          totalRemainingBoxes: 0,
+          totalShipmentWeightKg: 0,
+          totalShipmentVolumeM3: 0,
+          totalWeightFullPalletsKg: 0,
+          totalVolumeFullPalletsM3: 0,
+          totalWeightRemainingKg: 0,
+          totalVolumeRemainingM3: 0,
+          comments: [],
+          sharedArrivalDate: null,
+          arrivalDateConflict: false,
+        });
+      }
+
+      const group = map.get(key);
+      group.items.push(request);
+
+      const boxes = Number(request.BoxCount);
+      if (Number.isFinite(boxes)) {
+        group.totalBoxes += boxes;
+      }
+
+      const pallets = Number(request.PalletCount);
+      if (Number.isFinite(pallets)) {
+        group.totalPallets += pallets;
+      }
+
+      const fullPallets = Number(request.FullPallets);
+      if (Number.isFinite(fullPallets)) {
+        group.totalFullPallets += fullPallets;
+      }
+
+      const remainingBoxes = Number(request.RemainingBoxes);
+      if (Number.isFinite(remainingBoxes)) {
+        group.totalRemainingBoxes += remainingBoxes;
+      }
+
+      const totalShipmentWeight = Number(request.TotalShipmentWeightKg);
+      if (Number.isFinite(totalShipmentWeight)) {
+        group.totalShipmentWeightKg += totalShipmentWeight;
+      }
+
+      const totalShipmentVolume = Number(request.TotalShipmentVolumeM3);
+      if (Number.isFinite(totalShipmentVolume)) {
+        group.totalShipmentVolumeM3 += totalShipmentVolume;
+      }
+
+      const weightFullPallets = Number(request.WeightFullPalletsKg);
+      if (Number.isFinite(weightFullPallets)) {
+        group.totalWeightFullPalletsKg += weightFullPallets;
+      }
+
+      const volumeFullPallets = Number(request.VolumeFullPalletsM3);
+      if (Number.isFinite(volumeFullPallets)) {
+        group.totalVolumeFullPalletsM3 += volumeFullPallets;
+      }
+
+      const weightRemaining = Number(request.WeightRemainingKg);
+      if (Number.isFinite(weightRemaining)) {
+        group.totalWeightRemainingKg += weightRemaining;
+      }
+
+      const volumeRemaining = Number(request.VolumeRemainingM3);
+      if (Number.isFinite(volumeRemaining)) {
+        group.totalVolumeRemainingM3 += volumeRemaining;
+      }
+
+      const trimmedComment = (request.Comment || "").trim();
+      if (trimmedComment && !group.comments.includes(trimmedComment)) {
+        group.comments.push(trimmedComment);
+      }
+
+      if (!group.sharedArrivalDate && request.ArrivalDate) {
+        group.sharedArrivalDate = request.ArrivalDate;
+      } else if (
+        group.sharedArrivalDate &&
+        request.ArrivalDate &&
+        new Date(group.sharedArrivalDate).getTime() !==
+          new Date(request.ArrivalDate).getTime()
+      ) {
+        group.sharedArrivalDate = null;
+        group.arrivalDateConflict = true;
+      }
+    }
+
+    const toDate = (value) => {
+      if (!value) return 0;
+      const parsed = new Date(value);
+      const timestamp = parsed.getTime();
+      return Number.isNaN(timestamp) ? 0 : timestamp;
+    };
+
+    return Array.from(map.values()).sort((a, b) => {
+      const dateA = a.sharedArrivalDate
+        ? toDate(a.sharedArrivalDate)
+        : toDate(a.requestDate);
+      const dateB = b.sharedArrivalDate
+        ? toDate(b.sharedArrivalDate)
+        : toDate(b.requestDate);
+      return dateB - dateA;
+    });
+  }, [approvedRequests]);
+
+  const isGroupExpanded = (groupId) => Boolean(expandedGroups[groupId]);
+
+  const MetricGrid = ({ metrics }) => {
+    const visibleMetrics = metrics.filter((metric) => metric.value !== "—");
+
+    if (visibleMetrics.length === 0) {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          —
+        </Typography>
+      );
+    }
+
+    return (
+      <Grid container spacing={1.5} columns={12}>
+        {visibleMetrics.map((metric) => (
+          <Grid item xs={12} sm={6} key={metric.label}>
+            <Stack spacing={0.5}>
+              <Typography variant="caption" color="text.secondary">
+                {metric.label}
+              </Typography>
+              <Typography variant="body1" fontWeight={600}>
+                {metric.value}
+              </Typography>
+              {metric.secondary && (
+                <Typography variant="caption" color="text.secondary">
+                  {metric.secondary}
+                </Typography>
+              )}
+            </Stack>
+          </Grid>
+        ))}
+      </Grid>
+    );
   };
 
   return (
@@ -497,201 +673,325 @@ export default function AdminDashboard() {
               <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
                 <CircularProgress color="primary" />
               </Box>
-            ) : approvedRequests.length === 0 ? (
+            ) : approvedGroups.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 No confirmed imports are available yet. As confirmers approve
                 requests, they will appear in this registry automatically.
               </Typography>
             ) : (
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 600 }}>Request</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Importer</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Article</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>
-                      Boxes
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>
-                      Pallets
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>
-                      Arrival date
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>
-                      Details
-                    </TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {approvedRequests.map((request) => (
-                    <TableRow key={request.ID} hover>
-                      <TableCell>#{request.ID}</TableCell>
-                      <TableCell>{request.Importer}</TableCell>
-                      <TableCell>
-                        {formatArticleCode(request.Article)}
-                      </TableCell>
-                      <TableCell align="right">
-                        {formatQuantity(request.BoxCount)}
-                      </TableCell>
-                      <TableCell align="right">
-                        {formatQuantity(request.PalletCount)}
-                      </TableCell>
-                      <TableCell align="right">
-                        {formatDate(request.ArrivalDate)}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Button
-                          size="small"
-                          onClick={() => setSelectedImport(request)}
+              <Stack spacing={2.5}>
+                {approvedGroups.map((group) => {
+                  const sharedArrivalDate = group.sharedArrivalDate
+                    ? formatDate(group.sharedArrivalDate)
+                    : group.arrivalDateConflict
+                    ? "Multiple dates"
+                    : "—";
+
+                  return (
+                    <Box
+                      key={group.id}
+                      sx={{
+                        p: { xs: 2.5, md: 3 },
+                        borderRadius: 3,
+                        border: (theme) => `1px solid ${theme.palette.divider}`,
+                        backgroundColor: (theme) => theme.palette.background.paper,
+                      }}
+                    >
+                      <Stack spacing={2.5}>
+                        <Stack
+                          direction={{ xs: "column", md: "row" }}
+                          spacing={1.5}
+                          alignItems={{ md: "center" }}
                         >
-                          View
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                          <Stack spacing={0.5}>
+                            <Typography
+                              variant="overline"
+                              color="primary"
+                              sx={{ letterSpacing: 1 }}
+                            >
+                              Request bill #{group.reference}
+                            </Typography>
+                            <Typography variant="h6">{group.importer}</Typography>
+                            {group.requester && (
+                              <Typography variant="caption" color="text.secondary">
+                                Requested by {group.requester}
+                              </Typography>
+                            )}
+                          </Stack>
+                          <Chip
+                            label={`${group.items.length} article${
+                              group.items.length === 1 ? "" : "s"
+                            }`}
+                            size="small"
+                            sx={{ ml: { md: "auto" } }}
+                          />
+                        </Stack>
+
+                        <Grid container spacing={3}>
+                          <Grid item xs={12} md={6}>
+                            <Stack spacing={0.5}>
+                              <Typography variant="caption" color="text.secondary">
+                                Request date
+                              </Typography>
+                              <Typography variant="body1">
+                                {formatDate(group.requestDate)}
+                              </Typography>
+                            </Stack>
+                          </Grid>
+                          <Grid item xs={12} md={6}>
+                            <Stack spacing={0.5}>
+                              <Typography variant="caption" color="text.secondary">
+                                Arrival date
+                              </Typography>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <Typography variant="body1">
+                                  {sharedArrivalDate}
+                                </Typography>
+                                {group.arrivalDateConflict && (
+                                  <Chip
+                                    label="Multiple dates"
+                                    color="warning"
+                                    size="small"
+                                    variant="outlined"
+                                  />
+                                )}
+                              </Stack>
+                            </Stack>
+                          </Grid>
+                        </Grid>
+
+                        <MetricGrid
+                          metrics={[
+                            {
+                              label: "Total boxes",
+                              value: formatQuantity(group.totalBoxes),
+                              secondary: [
+                                group.totalFullPallets
+                                  ? `${formatQuantity(group.totalFullPallets, 2)} full pallets`
+                                  : null,
+                                group.totalRemainingBoxes
+                                  ? `${formatQuantity(group.totalRemainingBoxes)} loose boxes`
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" • ") || null,
+                            },
+                            {
+                              label: "Total pallets",
+                              value: formatQuantity(group.totalPallets),
+                            },
+                            {
+                              label: "Total shipment weight (kg)",
+                              value: formatQuantity(group.totalShipmentWeightKg, 2),
+                              secondary:
+                                group.totalWeightFullPalletsKg || group.totalWeightRemainingKg
+                                  ? [
+                                      group.totalWeightFullPalletsKg
+                                        ? `${formatQuantity(
+                                            group.totalWeightFullPalletsKg,
+                                            2
+                                          )} on full pallets`
+                                        : null,
+                                      group.totalWeightRemainingKg
+                                        ? `${formatQuantity(
+                                            group.totalWeightRemainingKg,
+                                            2
+                                          )} remaining`
+                                        : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" • ") || null
+                                  : null,
+                            },
+                            {
+                              label: "Total shipment volume (m³)",
+                              value: formatQuantity(group.totalShipmentVolumeM3, 3),
+                              secondary:
+                                group.totalVolumeFullPalletsM3 || group.totalVolumeRemainingM3
+                                  ? [
+                                      group.totalVolumeFullPalletsM3
+                                        ? `${formatQuantity(
+                                            group.totalVolumeFullPalletsM3,
+                                            3
+                                          )} on full pallets`
+                                        : null,
+                                      group.totalVolumeRemainingM3
+                                        ? `${formatQuantity(
+                                            group.totalVolumeRemainingM3,
+                                            3
+                                          )} remaining`
+                                        : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" • ") || null
+                                  : null,
+                            },
+                          ]}
+                        />
+
+                        {group.comments.length > 0 && (
+                          <Stack spacing={0.5}>
+                            <Typography variant="caption" color="text.secondary">
+                              Requester notes
+                            </Typography>
+                            {group.comments.map((comment, index) => (
+                              <Typography
+                                key={`${group.id}-comment-${index}`}
+                                variant="body2"
+                                sx={{ whiteSpace: "pre-wrap" }}
+                              >
+                                {comment}
+                              </Typography>
+                            ))}
+                          </Stack>
+                        )}
+
+                        <Collapse in={isGroupExpanded(group.id)} timeout="auto" unmountOnExit>
+                          <Stack spacing={1.5} mt={1.5}>
+                            {group.items.map((item) => (
+                              <Box
+                                key={item.ID}
+                                sx={{
+                                  p: 2.5,
+                                  borderRadius: 2,
+                                  border: (theme) =>
+                                    `1px solid ${theme.palette.action.focus}`,
+                                  backgroundColor: (theme) =>
+                                    theme.palette.action.hover,
+                                }}
+                              >
+                                <Stack spacing={1.5}>
+                                  <Stack
+                                    direction={{ xs: "column", sm: "row" }}
+                                    spacing={1}
+                                    justifyContent="space-between"
+                                    alignItems={{ sm: "center" }}
+                                  >
+                                    <Box>
+                                      <Typography variant="body1" fontWeight={600}>
+                                        {formatArticleCode(item.Article)}
+                                      </Typography>
+                                      {item.Comment && (
+                                        <Typography
+                                          variant="caption"
+                                          color="text.secondary"
+                                          sx={{ whiteSpace: "pre-wrap" }}
+                                        >
+                                          {item.Comment}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                    <Chip
+                                      label={`Boxes ${formatQuantity(item.BoxCount)} • Pallets ${formatQuantity(
+                                        item.PalletCount
+                                      )}`}
+                                      size="small"
+                                      variant="outlined"
+                                    />
+                                  </Stack>
+
+                                  <Grid container spacing={3}>
+                                    <Grid item xs={12} md={6}>
+                                      <Stack spacing={0.75}>
+                                        <Typography variant="caption" color="text.secondary">
+                                          Load plan
+                                        </Typography>
+                                        <MetricGrid
+                                          metrics={[
+                                            {
+                                              label: "Boxes",
+                                              value: formatQuantity(item.BoxCount),
+                                            },
+                                            {
+                                              label: "Pallets",
+                                              value: formatQuantity(item.PalletCount),
+                                            },
+                                            {
+                                              label: "Full pallets",
+                                              value: formatQuantity(item.FullPallets, 2),
+                                            },
+                                            {
+                                              label: "Remaining boxes",
+                                              value: formatQuantity(item.RemainingBoxes),
+                                            },
+                                          ]}
+                                        />
+                                      </Stack>
+                                    </Grid>
+                                    <Grid item xs={12} md={6}>
+                                      <Stack spacing={0.75}>
+                                        <Typography variant="caption" color="text.secondary">
+                                          Weight &amp; volume
+                                        </Typography>
+                                        <MetricGrid
+                                          metrics={[
+                                            {
+                                              label: "Total shipment weight (kg)",
+                                              value: formatQuantity(
+                                                item.TotalShipmentWeightKg,
+                                                2
+                                              ),
+                                            },
+                                            {
+                                              label: "Total shipment volume (m³)",
+                                              value: formatQuantity(
+                                                item.TotalShipmentVolumeM3,
+                                                3
+                                              ),
+                                            },
+                                            {
+                                              label: "Pallet weight (kg)",
+                                              value: formatQuantity(item.PalletWeightKg, 2),
+                                            },
+                                            {
+                                              label: "Box weight (kg)",
+                                              value: formatQuantity(item.BoxWeightKg, 2),
+                                            },
+                                          ]}
+                                        />
+                                      </Stack>
+                                    </Grid>
+                                  </Grid>
+                                </Stack>
+                              </Box>
+                            ))}
+                          </Stack>
+                        </Collapse>
+
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 1,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <Typography variant="caption" color="text.secondary">
+                            {isGroupExpanded(group.id)
+                              ? "Hide the detailed article breakdown"
+                              : "Show the detailed article breakdown"}
+                          </Typography>
+                          <Button
+                            size="small"
+                            variant="text"
+                            color="secondary"
+                            onClick={() => toggleGroup(group.id)}
+                          >
+                            {isGroupExpanded(group.id) ? "Hide articles" : "View articles"}
+                          </Button>
+                        </Box>
+                      </Stack>
+                    </Box>
+                  );
+                })}
+              </Stack>
             )}
           </Paper>
 
           <CalendarOverview description="Review confirmed import requests and prepare for upcoming arrivals." />
         </Stack>
       </Container>
-      <Dialog
-        open={Boolean(selectedImport)}
-        onClose={() => setSelectedImport(null)}
-        fullWidth
-        maxWidth="sm"
-      >
-        <DialogTitle>
-          {selectedImport
-            ? `Import request #${selectedImport.ID}`
-            : "Import details"}
-        </DialogTitle>
-        <DialogContent dividers>
-          {selectedImport ? (
-            <Stack spacing={2}>
-              <Stack spacing={0.5}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Importer
-                </Typography>
-                <Typography variant="body1">
-                  {selectedImport.Importer}
-                </Typography>
-              </Stack>
-              <Divider />
-              <Stack
-                spacing={0.5}
-                direction={{ xs: "column", sm: "row" }}
-                gap={{ sm: 6 }}
-              >
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Article
-                  </Typography>
-                  <Typography variant="body1">
-                    {formatArticleCode(selectedImport.Article)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Status
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {selectedImport.Status ?? "approved"}
-                  </Typography>
-                </Box>
-              </Stack>
-              <Divider />
-              <Stack
-                spacing={0.5}
-                direction={{ xs: "column", sm: "row" }}
-                gap={{ sm: 6 }}
-              >
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Request date
-                  </Typography>
-                  <Typography variant="body1">
-                    {formatDate(selectedImport.RequestDate)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Arrival date
-                  </Typography>
-                  <Typography variant="body1">
-                    {formatDate(selectedImport.ArrivalDate)}
-                  </Typography>
-                </Box>
-              </Stack>
-              <Divider />
-              <Stack
-                spacing={0.5}
-                direction={{ xs: "column", sm: "row" }}
-                gap={{ sm: 6 }}
-              >
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Box quantity
-                  </Typography>
-                  <Typography variant="body1">
-                    {formatQuantity(selectedImport.BoxCount)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Pallet positions
-                  </Typography>
-                  <Typography variant="body1">
-                    {formatQuantity(selectedImport.PalletCount)}
-                  </Typography>
-                </Box>
-              </Stack>
-              {(selectedImport.Comment || "").trim() && (
-                <>
-                  <Divider />
-                  <Stack spacing={0.5}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Requester note
-                    </Typography>
-                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-                      {selectedImport.Comment}
-                    </Typography>
-                  </Stack>
-                </>
-              )}
-              <Divider />
-              <Stack
-                spacing={0.5}
-                direction={{ xs: "column", sm: "row" }}
-                gap={{ sm: 6 }}
-              >
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Requested by
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {selectedImport.Requester ?? "—"}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Confirmed by
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {selectedImport.ConfirmedBy ?? "—"}
-                  </Typography>
-                </Box>
-              </Stack>
-            </Stack>
-          ) : null}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSelectedImport(null)}>Close</Button>
-        </DialogActions>
-      </Dialog>
       <UserManagementDialog
         open={isUserDialogOpen}
         onClose={handleCloseUserDialog}

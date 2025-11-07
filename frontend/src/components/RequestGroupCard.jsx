@@ -7,12 +7,8 @@ import {
   CardContent,
   Chip,
   Divider,
+  Grid,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
   Typography,
 } from "@mui/material";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
@@ -43,19 +39,10 @@ const formatQuantity = (value, fractionDigits = 0) => {
   });
 };
 
-const formatPercent = (value, fractionDigits = 1) => {
-  if (value === null || value === undefined) return "—";
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) return "—";
-  return `${numericValue.toLocaleString(undefined, {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  })}%`;
-};
+const MetricGrid = ({ metrics }) => {
+  const visibleMetrics = metrics.filter((metric) => metric.value !== "—");
 
-const renderMetricList = (metrics) => {
-  const filtered = metrics.filter((metric) => metric.value !== "—");
-  if (filtered.length === 0) {
+  if (visibleMetrics.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
         —
@@ -64,16 +51,25 @@ const renderMetricList = (metrics) => {
   }
 
   return (
-    <Stack spacing={0.75}>
-      {filtered.map((metric) => (
-        <Stack key={metric.label} spacing={0.25}>
-          <Typography variant="caption" color="text.secondary">
-            {metric.label}
-          </Typography>
-          <Typography variant="body2">{metric.value}</Typography>
-        </Stack>
+    <Grid container spacing={1.5} columns={12}>
+      {visibleMetrics.map((metric) => (
+        <Grid item xs={12} sm={6} key={metric.label}>
+          <Stack spacing={0.5}>
+            <Typography variant="caption" color="text.secondary">
+              {metric.label}
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {metric.value}
+            </Typography>
+            {metric.secondary && (
+              <Typography variant="caption" color="text.secondary">
+                {metric.secondary}
+              </Typography>
+            )}
+          </Stack>
+        </Grid>
       ))}
-    </Stack>
+    </Grid>
   );
 };
 
@@ -143,7 +139,12 @@ export default function RequestGroupCard({
           <Divider sx={{ my: 1 }} />
 
           <Stack spacing={1.5}>
-            <Stack spacing={0.5} direction={{ xs: "column", sm: "row" }} gap={{ sm: 6 }}>
+            <Stack
+              spacing={0.5}
+              direction={{ xs: "column", sm: "row" }}
+              gap={{ sm: 6 }}
+              alignItems={{ sm: "center" }}
+            >
               <Box>
                 <Typography variant="subtitle2" color="text.secondary">
                   Request date
@@ -154,203 +155,197 @@ export default function RequestGroupCard({
                 <Typography variant="subtitle2" color="text.secondary">
                   Arrival date (Data Arritjes)
                 </Typography>
-                <Typography variant="body1">{sharedArrivalDate}</Typography>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body1">{sharedArrivalDate}</Typography>
+                  {group.arrivalDateConflict && (
+                    <Chip
+                      label="Multiple dates"
+                      color="warning"
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                </Stack>
               </Box>
             </Stack>
 
-            {(() => {
-              const metrics = [
-                {
-                  label: "Total boxes",
-                  value: formatQuantity(group.totalBoxes),
-                },
-                {
-                  label: "Calculated pallets",
-                  value: formatQuantity(group.totalPallets),
-                },
-                {
-                  label: "Full pallets",
-                  value: formatQuantity(group.totalFullPallets, 2),
-                },
-                {
-                  label: "Remaining boxes",
-                  value: formatQuantity(group.totalRemainingBoxes),
-                },
-                {
-                  label: "Total shipment weight (kg)",
-                  value: formatQuantity(group.totalShipmentWeightKg, 2),
-                },
-                {
-                  label: "Total shipment volume (m³)",
-                  value: formatQuantity(group.totalShipmentVolumeM3, 3),
-                },
-                {
-                  label: "Weight · full pallets (kg)",
-                  value: formatQuantity(group.totalWeightFullPalletsKg, 2),
-                },
-                {
-                  label: "Volume · full pallets (m³)",
-                  value: formatQuantity(group.totalVolumeFullPalletsM3, 3),
-                },
-                {
-                  label: "Weight · remaining (kg)",
-                  value: formatQuantity(group.totalWeightRemainingKg, 2),
-                },
-                {
-                  label: "Volume · remaining (m³)",
-                  value: formatQuantity(group.totalVolumeRemainingM3, 3),
-                },
-              ].filter((metric) => metric.value !== "—");
+            <Stack spacing={0.75}>
+              <Typography variant="subtitle2" color="text.secondary">
+                Load summary
+              </Typography>
+              <MetricGrid
+                metrics={[
+                  {
+                    label: "Total boxes",
+                    value: formatQuantity(group.totalBoxes),
+                    secondary: [
+                      group.totalFullPallets
+                        ? `${formatQuantity(group.totalFullPallets, 2)} full pallets`
+                        : null,
+                      group.totalRemainingBoxes
+                        ? `${formatQuantity(group.totalRemainingBoxes)} loose boxes`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" • ") || null,
+                  },
+                  {
+                    label: "Calculated pallets",
+                    value: formatQuantity(group.totalPallets),
+                  },
+                  {
+                    label: "Total shipment weight (kg)",
+                    value: formatQuantity(group.totalShipmentWeightKg, 2),
+                    secondary:
+                      group.totalWeightFullPalletsKg || group.totalWeightRemainingKg
+                        ? [
+                            group.totalWeightFullPalletsKg
+                              ? `${formatQuantity(
+                                  group.totalWeightFullPalletsKg,
+                                  2
+                                )} on full pallets`
+                              : null,
+                            group.totalWeightRemainingKg
+                              ? `${formatQuantity(
+                                  group.totalWeightRemainingKg,
+                                  2
+                                )} remaining`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" • ") || null
+                        : null,
+                  },
+                  {
+                    label: "Total shipment volume (m³)",
+                    value: formatQuantity(group.totalShipmentVolumeM3, 3),
+                    secondary:
+                      group.totalVolumeFullPalletsM3 || group.totalVolumeRemainingM3
+                        ? [
+                            group.totalVolumeFullPalletsM3
+                              ? `${formatQuantity(
+                                  group.totalVolumeFullPalletsM3,
+                                  3
+                                )} on full pallets`
+                              : null,
+                            group.totalVolumeRemainingM3
+                              ? `${formatQuantity(
+                                  group.totalVolumeRemainingM3,
+                                  3
+                                )} remaining`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" • ") || null
+                        : null,
+                  },
+                ]}
+              />
+            </Stack>
 
-              if (metrics.length === 0) {
-                return null;
-              }
-
-              return (
-                <Stack spacing={0.75}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Load summary
-                  </Typography>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 2,
-                    }}
-                  >
-                    {metrics.map((metric) => (
-                      <Box
-                        key={metric.label}
-                        sx={{ minWidth: { xs: "100%", sm: "45%", md: "30%" } }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          {metric.label}
-                        </Typography>
-                        <Typography variant="body1">{metric.value}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                </Stack>
-              );
-            })()}
-
-            <Stack spacing={0.5}>
+            <Stack spacing={1.5}>
               <Typography variant="subtitle2" color="text.secondary">
                 Articles in this bill
               </Typography>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Article</TableCell>
-                    <TableCell>Load details</TableCell>
-                    <TableCell>Weight &amp; volume</TableCell>
-                    <TableCell align="right">Requester</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {group.items.map((item) => (
-                    <TableRow key={item.ID} hover>
-                      <TableCell sx={{ minWidth: 160 }}>
-                        <Typography variant="body2" fontWeight={600} gutterBottom>
-                          {formatArticleCode(item.Article)}
-                        </Typography>
-                        {item.Comment && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ whiteSpace: "pre-wrap" }}
-                          >
-                            {item.Comment}
+              <Stack spacing={1.5}>
+                {group.items.map((item) => (
+                  <Box
+                    key={item.ID}
+                    sx={{
+                      p: 2.5,
+                      borderRadius: 3,
+                      border: `1px solid ${alpha(theme.palette.primary.main, 0.12)}`,
+                      backgroundColor: alpha(theme.palette.background.paper, 0.6),
+                    }}
+                  >
+                    <Stack spacing={1.5}>
+                      <Stack
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={1}
+                        justifyContent="space-between"
+                        alignItems={{ sm: "center" }}
+                      >
+                        <Box>
+                          <Typography variant="body1" fontWeight={600}>
+                            {formatArticleCode(item.Article)}
                           </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ minWidth: 200 }}>
-                        {renderMetricList([
-                          {
-                            label: "Boxes",
-                            value: formatQuantity(item.BoxCount),
-                          },
-                          {
-                            label: "Pallets",
-                            value: formatQuantity(item.PalletCount),
-                          },
-                          {
-                            label: "Full pallets",
-                            value: formatQuantity(item.FullPallets, 2),
-                          },
-                          {
-                            label: "Remaining boxes",
-                            value: formatQuantity(item.RemainingBoxes),
-                          },
-                          {
-                            label: "Boxes per pallet",
-                            value: formatQuantity(item.BoxesPerPallet, 2),
-                          },
-                          {
-                            label: "Boxes per layer",
-                            value: formatQuantity(item.BoxesPerLayer, 2),
-                          },
-                          {
-                            label: "Layers per pallet",
-                            value: formatQuantity(item.LayersPerPallet, 2),
-                          },
-                        ])}
-                      </TableCell>
-                      <TableCell sx={{ minWidth: 220 }}>
-                        {renderMetricList([
-                          {
-                            label: "Pallet weight (kg)",
-                            value: formatQuantity(item.PalletWeightKg, 2),
-                          },
-                          {
-                            label: "Pallet volume (m³)",
-                            value: formatQuantity(item.PalletVolumeM3, 3),
-                          },
-                          {
-                            label: "Box weight (kg)",
-                            value: formatQuantity(item.BoxWeightKg, 2),
-                          },
-                          {
-                            label: "Box volume (m³)",
-                            value: formatQuantity(item.BoxVolumeM3, 3),
-                          },
-                          {
-                            label: "Pallet utilization",
-                            value: formatPercent(item.PalletVolumeUtilization),
-                          },
-                          {
-                            label: "Weight · full pallets (kg)",
-                            value: formatQuantity(item.WeightFullPalletsKg, 2),
-                          },
-                          {
-                            label: "Volume · full pallets (m³)",
-                            value: formatQuantity(item.VolumeFullPalletsM3, 3),
-                          },
-                          {
-                            label: "Weight · remaining (kg)",
-                            value: formatQuantity(item.WeightRemainingKg, 2),
-                          },
-                          {
-                            label: "Volume · remaining (m³)",
-                            value: formatQuantity(item.VolumeRemainingM3, 3),
-                          },
-                          {
-                            label: "Total shipment weight (kg)",
-                            value: formatQuantity(item.TotalShipmentWeightKg, 2),
-                          },
-                          {
-                            label: "Total shipment volume (m³)",
-                            value: formatQuantity(item.TotalShipmentVolumeM3, 3),
-                          },
-                        ])}
-                      </TableCell>
-                      <TableCell align="right" sx={{ minWidth: 120 }}>
-                        {item.Requester ?? "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                          {item.Comment && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ whiteSpace: "pre-wrap" }}
+                            >
+                              {item.Comment}
+                            </Typography>
+                          )}
+                        </Box>
+                        <Chip
+                          label={`Requested by ${item.Requester ?? "—"}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                      </Stack>
+
+                      <Grid container spacing={3}>
+                        <Grid item xs={12} md={6}>
+                          <Stack spacing={0.75}>
+                            <Typography variant="caption" color="text.secondary">
+                              Load plan
+                            </Typography>
+                            <MetricGrid
+                              metrics={[
+                                {
+                                  label: "Boxes",
+                                  value: formatQuantity(item.BoxCount),
+                                },
+                                {
+                                  label: "Pallets",
+                                  value: formatQuantity(item.PalletCount),
+                                },
+                                {
+                                  label: "Full pallets",
+                                  value: formatQuantity(item.FullPallets, 2),
+                                },
+                                {
+                                  label: "Remaining boxes",
+                                  value: formatQuantity(item.RemainingBoxes),
+                                },
+                              ]}
+                            />
+                          </Stack>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <Stack spacing={0.75}>
+                            <Typography variant="caption" color="text.secondary">
+                              Weight &amp; volume
+                            </Typography>
+                            <MetricGrid
+                              metrics={[
+                                {
+                                  label: "Total shipment weight (kg)",
+                                  value: formatQuantity(item.TotalShipmentWeightKg, 2),
+                                },
+                                {
+                                  label: "Total shipment volume (m³)",
+                                  value: formatQuantity(item.TotalShipmentVolumeM3, 3),
+                                },
+                                {
+                                  label: "Pallet weight (kg)",
+                                  value: formatQuantity(item.PalletWeightKg, 2),
+                                },
+                                {
+                                  label: "Box weight (kg)",
+                                  value: formatQuantity(item.BoxWeightKg, 2),
+                                },
+                              ]}
+                            />
+                          </Stack>
+                        </Grid>
+                      </Grid>
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
             </Stack>
 
             {group.comments.length > 0 && (

@@ -144,6 +144,92 @@ const mapArticles = (records) =>
     return mapped;
   });
 
+const WMS_ALLOWED_ORDER_CODE = "53";
+
+const trimString = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+  return stringValue.length > 0 ? stringValue : null;
+};
+
+const parseDateValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const parseBooleanFlag = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "t", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "f", "no", "n"].includes(normalized)) {
+    return false;
+  }
+
+  return null;
+};
+
+const mapRawWmsOrder = (record = {}) => {
+  const orderIdValue = Number(record.NarID);
+  const orderTypeValue = trimString(record.Sifra_Nar);
+
+  return {
+    orderId: Number.isFinite(orderIdValue) ? orderIdValue : null,
+    orderTypeCode: orderTypeValue,
+    orderNumber: trimString(record.Broj_Nar),
+    customerCode: trimString(record.Sifra_Kup),
+    orderDate: parseDateValue(record.Datum_Nar),
+    expectedDate: parseDateValue(record.Dat_Ocek),
+    customerName: trimString(record.ImeKup),
+    isRealized: trimString(record.Realiziran),
+    orderStatus: trimString(record.Stat_Nar),
+    description: trimString(record.Opis),
+    sourceReference: trimString(record.Z_KogaDosol),
+    scheduledStart: parseDateValue(record.Poc_Vreme_Zadad),
+    originalOrderNumber: trimString(record.Originalen_Broj_Naracka),
+    canProceed: parseBooleanFlag(record.Moze_Broj),
+  };
+};
+
+const mapWmsOrderResponse = (record = {}) => ({
+  id: record.ID,
+  orderId: record.OrderId,
+  orderTypeCode: record.OrderTypeCode,
+  orderNumber: record.OrderNumber,
+  customerCode: record.CustomerCode,
+  orderDate: record.OrderDate ?? null,
+  expectedDate: record.ExpectedDate ?? null,
+  customerName: record.CustomerName ?? null,
+  isRealized: record.IsRealized ?? null,
+  orderStatus: record.OrderStatus ?? null,
+  description: record.Description ?? null,
+  sourceReference: record.SourceReference ?? null,
+  scheduledStart: record.ScheduledStart ?? null,
+  originalOrderNumber: record.OriginalOrderNumber ?? null,
+  canProceed: record.CanProceed ?? null,
+  lastSyncedAt: record.LastSyncedAt ?? null,
+});
+
 router.post("/", verifyRole(["requester"]), async (req, res) => {
   const { requestDate, arrivalDate, importer, comment, article, boxCount, items } =
     req.body;
@@ -627,6 +713,226 @@ router.get(
     } catch (err) {
       console.error("Metrics fetch error:", err.message);
       res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+router.post(
+  "/wms-orders/sync",
+  verifyRole(["admin", "confirmer"]),
+  async (req, res) => {
+    try {
+      const secondaryPool = await secondaryPoolPromise;
+      const wmsResult = await secondaryPool
+        .request()
+        .input("Dali_Broj_Dokument", sql.NVarChar(1), "D")
+        .execute("wms_ZemiNarackiZaOdobruvanje");
+
+      const rawRecords = Array.isArray(wmsResult.recordset)
+        ? wmsResult.recordset
+        : [];
+
+      const filteredRecords = rawRecords.filter((record) => {
+        const typeCode = trimString(record.Sifra_Nar);
+        return typeCode === WMS_ALLOWED_ORDER_CODE;
+      });
+
+      const skippedDifferentCodes = rawRecords.length - filteredRecords.length;
+
+      const preparedRecords = filteredRecords
+        .map((record) => ({
+          raw: record,
+          mapped: mapRawWmsOrder(record),
+        }))
+        .filter((entry) => Number.isInteger(entry.mapped.orderId));
+
+      const skippedMissingIdentifiers = filteredRecords.length - preparedRecords.length;
+
+      if (preparedRecords.length === 0) {
+        return res.json({
+          message: `No WMS orders with code ${WMS_ALLOWED_ORDER_CODE} were available to sync.`,
+          imported: 0,
+          skippedDifferentCodes,
+          skippedMissingIdentifiers,
+          orders: [],
+        });
+      }
+
+      const pool = await poolPromise;
+      const transaction = new sql.Transaction(pool);
+
+      await transaction.begin();
+
+      const processedOrderIds = new Set();
+
+      try {
+        for (const { mapped } of preparedRecords) {
+          const request = new sql.Request(transaction)
+            .input("OrderId", sql.Int, mapped.orderId)
+            .input("OrderTypeCode", sql.NVarChar(10), mapped.orderTypeCode)
+            .input("OrderNumber", sql.NVarChar(50), mapped.orderNumber)
+            .input("CustomerCode", sql.NVarChar(50), mapped.customerCode)
+            .input("CustomerName", sql.NVarChar(255), mapped.customerName)
+            .input("OrderDate", sql.DateTime2, mapped.orderDate ?? null)
+            .input("ExpectedDate", sql.DateTime2, mapped.expectedDate ?? null)
+            .input("IsRealized", sql.NVarChar(10), mapped.isRealized)
+            .input("OrderStatus", sql.NVarChar(10), mapped.orderStatus)
+            .input("Description", sql.NVarChar(500), mapped.description)
+            .input("SourceReference", sql.NVarChar(100), mapped.sourceReference)
+            .input("ScheduledStart", sql.DateTime2, mapped.scheduledStart ?? null)
+            .input(
+              "OriginalOrderNumber",
+              sql.NVarChar(100),
+              mapped.originalOrderNumber
+            )
+            .input("CanProceed", sql.Bit, mapped.canProceed);
+
+          await request.query(`MERGE WmsOrders AS Target
+              USING (SELECT @OrderId AS OrderId) AS Source
+              ON Target.OrderId = Source.OrderId
+              WHEN MATCHED THEN
+                UPDATE SET
+                  OrderTypeCode = @OrderTypeCode,
+                  OrderNumber = @OrderNumber,
+                  CustomerCode = @CustomerCode,
+                  CustomerName = @CustomerName,
+                  OrderDate = @OrderDate,
+                  ExpectedDate = @ExpectedDate,
+                  IsRealized = @IsRealized,
+                  OrderStatus = @OrderStatus,
+                  Description = @Description,
+                  SourceReference = @SourceReference,
+                  ScheduledStart = @ScheduledStart,
+                  OriginalOrderNumber = @OriginalOrderNumber,
+                  CanProceed = @CanProceed,
+                  LastSyncedAt = SYSUTCDATETIME()
+              WHEN NOT MATCHED THEN
+                INSERT (
+                  OrderId,
+                  OrderTypeCode,
+                  OrderNumber,
+                  CustomerCode,
+                  CustomerName,
+                  OrderDate,
+                  ExpectedDate,
+                  IsRealized,
+                  OrderStatus,
+                  Description,
+                  SourceReference,
+                  ScheduledStart,
+                  OriginalOrderNumber,
+                  CanProceed,
+                  LastSyncedAt
+                )
+                VALUES (
+                  @OrderId,
+                  @OrderTypeCode,
+                  @OrderNumber,
+                  @CustomerCode,
+                  @CustomerName,
+                  @OrderDate,
+                  @ExpectedDate,
+                  @IsRealized,
+                  @OrderStatus,
+                  @Description,
+                  @SourceReference,
+                  @ScheduledStart,
+                  @OriginalOrderNumber,
+                  @CanProceed,
+                  SYSUTCDATETIME()
+                );`);
+
+          processedOrderIds.add(mapped.orderId);
+        }
+
+        await transaction.commit();
+      } catch (transactionError) {
+        try {
+          await transaction.rollback();
+        } catch (rollbackError) {
+          console.error("WMS sync rollback error:", rollbackError.message);
+        }
+
+        throw transactionError;
+      }
+
+      const uniqueOrderIds = [...processedOrderIds];
+      let syncedOrders = [];
+
+      if (uniqueOrderIds.length > 0) {
+        const fetchRequest = pool.request();
+        const parameterPlaceholders = uniqueOrderIds.map((orderId, index) => {
+          const parameter = `OrderId${index}`;
+          fetchRequest.input(parameter, sql.Int, orderId);
+          return `@${parameter}`;
+        });
+
+        const fetchResult = await fetchRequest.query(`SELECT ID,
+                     OrderId,
+                     OrderTypeCode,
+                     OrderNumber,
+                     CustomerCode,
+                     CustomerName,
+                     OrderDate,
+                     ExpectedDate,
+                     IsRealized,
+                     OrderStatus,
+                     Description,
+                     SourceReference,
+                     ScheduledStart,
+                     OriginalOrderNumber,
+                     CanProceed,
+                     LastSyncedAt
+              FROM WmsOrders
+              WHERE OrderId IN (${parameterPlaceholders.join(", ")})
+              ORDER BY ExpectedDate ASC, OrderDate ASC, OrderId ASC`);
+
+        syncedOrders = fetchResult.recordset.map(mapWmsOrderResponse);
+      }
+
+      res.json({
+        message: `Synchronized ${uniqueOrderIds.length} WMS order(s) with code ${WMS_ALLOWED_ORDER_CODE}.`,
+        imported: uniqueOrderIds.length,
+        skippedDifferentCodes,
+        skippedMissingIdentifiers,
+        orders: syncedOrders,
+      });
+    } catch (err) {
+      console.error("WMS sync error:", err.message);
+      res.status(500).json({ message: "Failed to synchronize WMS orders." });
+    }
+  }
+);
+
+router.get(
+  "/wms-orders",
+  verifyRole(["admin", "confirmer", "requester"]),
+  async (req, res) => {
+    try {
+      const pool = await poolPromise;
+      const result = await pool.request().query(`SELECT ID,
+                     OrderId,
+                     OrderTypeCode,
+                     OrderNumber,
+                     CustomerCode,
+                     CustomerName,
+                     OrderDate,
+                     ExpectedDate,
+                     IsRealized,
+                     OrderStatus,
+                     Description,
+                     SourceReference,
+                     ScheduledStart,
+                     OriginalOrderNumber,
+                     CanProceed,
+                     LastSyncedAt
+              FROM WmsOrders
+              ORDER BY ExpectedDate ASC, OrderDate ASC, OrderId ASC`);
+
+      res.json(result.recordset.map(mapWmsOrderResponse));
+    } catch (err) {
+      console.error("WMS orders fetch error:", err.message);
+      res.status(500).json({ message: "Failed to load WMS orders." });
     }
   }
 );
