@@ -90,6 +90,14 @@ export default function ConfirmerDashboard() {
           items: [],
           totalBoxes: 0,
           totalPallets: 0,
+          totalFullPallets: 0,
+          totalRemainingBoxes: 0,
+          totalShipmentWeightKg: 0,
+          totalShipmentVolumeM3: 0,
+          totalWeightFullPalletsKg: 0,
+          totalVolumeFullPalletsM3: 0,
+          totalWeightRemainingKg: 0,
+          totalVolumeRemainingM3: 0,
           comments: [],
           sharedArrivalDate: null,
           arrivalDateConflict: false,
@@ -107,6 +115,46 @@ export default function ConfirmerDashboard() {
       const pallets = Number(request.PalletCount);
       if (Number.isFinite(pallets)) {
         group.totalPallets += pallets;
+      }
+
+      const fullPallets = Number(request.FullPallets);
+      if (Number.isFinite(fullPallets)) {
+        group.totalFullPallets += fullPallets;
+      }
+
+      const remainingBoxes = Number(request.RemainingBoxes);
+      if (Number.isFinite(remainingBoxes)) {
+        group.totalRemainingBoxes += remainingBoxes;
+      }
+
+      const totalShipmentWeight = Number(request.TotalShipmentWeightKg);
+      if (Number.isFinite(totalShipmentWeight)) {
+        group.totalShipmentWeightKg += totalShipmentWeight;
+      }
+
+      const totalShipmentVolume = Number(request.TotalShipmentVolumeM3);
+      if (Number.isFinite(totalShipmentVolume)) {
+        group.totalShipmentVolumeM3 += totalShipmentVolume;
+      }
+
+      const weightFullPallets = Number(request.WeightFullPalletsKg);
+      if (Number.isFinite(weightFullPallets)) {
+        group.totalWeightFullPalletsKg += weightFullPallets;
+      }
+
+      const volumeFullPallets = Number(request.VolumeFullPalletsM3);
+      if (Number.isFinite(volumeFullPallets)) {
+        group.totalVolumeFullPalletsM3 += volumeFullPallets;
+      }
+
+      const weightRemaining = Number(request.WeightRemainingKg);
+      if (Number.isFinite(weightRemaining)) {
+        group.totalWeightRemainingKg += weightRemaining;
+      }
+
+      const volumeRemaining = Number(request.VolumeRemainingM3);
+      if (Number.isFinite(volumeRemaining)) {
+        group.totalVolumeRemainingM3 += volumeRemaining;
       }
 
       const trimmedComment = (request.Comment || "").trim();
@@ -240,16 +288,29 @@ export default function ConfirmerDashboard() {
           acc.boxes += boxValue;
         }
 
+        const weightValue = Number(request.TotalShipmentWeightKg);
+        if (Number.isFinite(weightValue)) {
+          acc.weight += weightValue;
+        }
+
+        const volumeValue = Number(request.TotalShipmentVolumeM3);
+        if (Number.isFinite(volumeValue)) {
+          acc.volume += volumeValue;
+        }
+
         return acc;
       },
-      { pallets: 0, boxes: 0 }
+      { pallets: 0, boxes: 0, weight: 0, volume: 0 }
     );
 
-    const formatAverage = (value, unit) => {
+    const formatAverage = (value, unit, fractionDigits = 0) => {
       if (!Number.isFinite(value) || value <= 0) {
         return null;
       }
-      const normalized = Math.round(value * 10) / 10;
+      const normalized = value.toLocaleString(undefined, {
+        minimumFractionDigits: fractionDigits,
+        maximumFractionDigits: fractionDigits,
+      });
       return `${normalized} ${unit}`;
     };
 
@@ -265,6 +326,24 @@ export default function ConfirmerDashboard() {
     );
     if (palletAverage) {
       averages.push(palletAverage);
+    }
+
+    const weightAverage = formatAverage(
+      totals.weight / pendingCount,
+      "kg",
+      1
+    );
+    if (weightAverage) {
+      averages.push(weightAverage);
+    }
+
+    const volumeAverage = formatAverage(
+      totals.volume / pendingCount,
+      "m³",
+      2
+    );
+    if (volumeAverage) {
+      averages.push(volumeAverage);
     }
 
     if (averages.length === 0) {

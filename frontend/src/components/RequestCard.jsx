@@ -51,12 +51,126 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
     });
   };
 
-  const formattedPalletCount = formatQuantity(req.PalletCount);
-  const formattedBoxCount = formatQuantity(req.BoxCount);
-  const formattedFullPallets = formatQuantity(req.FullPallets, 2);
-  const formattedRemainingBoxes = formatQuantity(req.RemainingBoxes);
-  const formattedTotalWeight = formatQuantity(req.TotalShipmentWeightKg, 2);
-  const formattedTotalVolume = formatQuantity(req.TotalShipmentVolumeM3, 3);
+  const formatPercent = (value, fractionDigits = 1) => {
+    if (value === null || value === undefined) return "N/A";
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return "N/A";
+    return `${numericValue.toLocaleString(undefined, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    })}%`;
+  };
+
+  const renderMetricGrid = (metrics) => {
+    const filtered = metrics.filter((metric) => metric.value !== "N/A");
+    if (filtered.length === 0) {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          No data available.
+        </Typography>
+      );
+    }
+
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 2,
+        }}
+      >
+        {filtered.map((metric) => (
+          <Box
+            key={metric.label}
+            sx={{ minWidth: { xs: "100%", sm: "45%", md: "30%" } }}
+          >
+            <Typography variant="caption" color="text.secondary">
+              {metric.label}
+            </Typography>
+            <Typography variant="body1">{metric.value}</Typography>
+          </Box>
+        ))}
+      </Box>
+    );
+  };
+
+  const loadMetrics = [
+    {
+      label: "Box quantity (Sasia - Pako)",
+      value: formatQuantity(req.BoxCount),
+    },
+    {
+      label: "Calculated pallets",
+      value: formatQuantity(req.PalletCount),
+    },
+    {
+      label: "Full pallets",
+      value: formatQuantity(req.FullPallets, 2),
+    },
+    {
+      label: "Remaining boxes",
+      value: formatQuantity(req.RemainingBoxes),
+    },
+    {
+      label: "Boxes per pallet",
+      value: formatQuantity(req.BoxesPerPallet, 2),
+    },
+    {
+      label: "Boxes per layer",
+      value: formatQuantity(req.BoxesPerLayer, 2),
+    },
+    {
+      label: "Layers per pallet",
+      value: formatQuantity(req.LayersPerPallet, 2),
+    },
+  ];
+
+  const weightVolumeMetrics = [
+    {
+      label: "Pallet weight (kg)",
+      value: formatQuantity(req.PalletWeightKg, 2),
+    },
+    {
+      label: "Pallet volume (m³)",
+      value: formatQuantity(req.PalletVolumeM3, 3),
+    },
+    {
+      label: "Box weight (kg)",
+      value: formatQuantity(req.BoxWeightKg, 2),
+    },
+    {
+      label: "Box volume (m³)",
+      value: formatQuantity(req.BoxVolumeM3, 3),
+    },
+    {
+      label: "Pallet utilization",
+      value: formatPercent(req.PalletVolumeUtilization),
+    },
+    {
+      label: "Weight · full pallets (kg)",
+      value: formatQuantity(req.WeightFullPalletsKg, 2),
+    },
+    {
+      label: "Volume · full pallets (m³)",
+      value: formatQuantity(req.VolumeFullPalletsM3, 3),
+    },
+    {
+      label: "Weight · remaining (kg)",
+      value: formatQuantity(req.WeightRemainingKg, 2),
+    },
+    {
+      label: "Volume · remaining (m³)",
+      value: formatQuantity(req.VolumeRemainingM3, 3),
+    },
+    {
+      label: "Total shipment weight (kg)",
+      value: formatQuantity(req.TotalShipmentWeightKg, 2),
+    },
+    {
+      label: "Total shipment volume (m³)",
+      value: formatQuantity(req.TotalShipmentVolumeM3, 3),
+    },
+  ];
 
   return (
     <Card
@@ -137,64 +251,18 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
                 <Typography variant="body1">{formattedArrivalDate}</Typography>
               </Box>
             </Stack>
-            <Stack spacing={0.5} direction={{ xs: "column", sm: "row" }} gap={{ sm: 6 }}>
-              <Box>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Box quantity (Sasia - Pako)
-                </Typography>
-                <Typography variant="body1">{formattedBoxCount}</Typography>
-              </Box>
-              <Box>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Calculated pallets
-                </Typography>
-                <Typography variant="body1">{formattedPalletCount}</Typography>
-              </Box>
+            <Stack spacing={0.5}>
+              <Typography variant="subtitle2" color="text.secondary">
+                Load details
+              </Typography>
+              {renderMetricGrid(loadMetrics)}
             </Stack>
-            {(req.FullPallets !== undefined && req.FullPallets !== null) ||
-            (req.RemainingBoxes !== undefined && req.RemainingBoxes !== null) ? (
-              <Stack
-                spacing={0.5}
-                direction={{ xs: "column", sm: "row" }}
-                gap={{ sm: 6 }}
-              >
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Full pallets
-                  </Typography>
-                  <Typography variant="body1">{formattedFullPallets}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Remaining boxes
-                  </Typography>
-                  <Typography variant="body1">{formattedRemainingBoxes}</Typography>
-                </Box>
-              </Stack>
-            ) : null}
-            {(req.TotalShipmentWeightKg !== undefined &&
-              req.TotalShipmentWeightKg !== null) ||
-            (req.TotalShipmentVolumeM3 !== undefined &&
-              req.TotalShipmentVolumeM3 !== null) ? (
-              <Stack
-                spacing={0.5}
-                direction={{ xs: "column", sm: "row" }}
-                gap={{ sm: 6 }}
-              >
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Total shipment weight (kg)
-                  </Typography>
-                  <Typography variant="body1">{formattedTotalWeight}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Total shipment volume (m³)
-                  </Typography>
-                  <Typography variant="body1">{formattedTotalVolume}</Typography>
-                </Box>
-              </Stack>
-            ) : null}
+            <Stack spacing={0.5}>
+              <Typography variant="subtitle2" color="text.secondary">
+                Weight &amp; volume metrics
+              </Typography>
+              {renderMetricGrid(weightVolumeMetrics)}
+            </Stack>
             <Stack spacing={0.5} direction={{ xs: "column", sm: "row" }} gap={{ sm: 6 }}>
               <Box>
                 <Typography variant="subtitle2" color="text.secondary">
