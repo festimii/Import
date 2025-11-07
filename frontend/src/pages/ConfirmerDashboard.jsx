@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -22,6 +22,7 @@ import {
 import { alpha } from "@mui/material/styles";
 import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
+import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import API from "../api";
 import RequestGroupCard from "../components/RequestGroupCard";
@@ -29,6 +30,7 @@ import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
+import NotificationCenter from "../components/NotificationCenter";
 import formatArticleCode from "../utils/formatArticle";
 
 export default function ConfirmerDashboard() {
@@ -40,6 +42,9 @@ export default function ConfirmerDashboard() {
   const [proposalDate, setProposalDate] = useState("");
   const [proposalSubmitting, setProposalSubmitting] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState(null);
+  const notificationCenterRef = useRef(null);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -401,13 +406,34 @@ export default function ConfirmerDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <NotificationPermissionBanner />
+          <Stack spacing={2}>
+            <NotificationPermissionBanner
+              onEnabled={() => notificationCenterRef.current?.reload()}
+            />
+            <NotificationCenter
+              ref={notificationCenterRef}
+              onUnreadCountChange={setUnreadNotifications}
+              onLoadingChange={setNotificationsLoading}
+              description="Keep track of approvals, rejections and proposed schedules that need your attention."
+              emptyMessage="You're caught up with the latest updates."
+            />
+          </Stack>
           {feedback && (
             <Alert severity={feedback.severity}>{feedback.message}</Alert>
           )}
 
           <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
+              <StatCard
+                icon={<NotificationsActiveRoundedIcon />}
+                label="Unread updates"
+                value={
+                  notificationsLoading ? "…" : unreadNotifications
+                }
+                trend="Dismiss notifications as you review each request"
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
               <StatCard
                 icon={<AssignmentTurnedInRoundedIcon />}
                 label="Pending decisions"
@@ -415,7 +441,7 @@ export default function ConfirmerDashboard() {
                 trend="Approve or reject grouped requests to keep freight moving"
               />
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
               <StatCard
                 icon={<Inventory2RoundedIcon />}
                 label="Average load"
@@ -424,7 +450,7 @@ export default function ConfirmerDashboard() {
                 color="secondary"
               />
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
               <StatCard
                 icon={<ScheduleRoundedIcon />}
                 label="Awaiting schedule"

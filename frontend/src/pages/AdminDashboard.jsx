@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -18,11 +18,14 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+import { BarChart, LineChart } from "@mui/x-charts";
 import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
 import VerifiedUserRoundedIcon from "@mui/icons-material/VerifiedUserRounded";
 import EventBusyRoundedIcon from "@mui/icons-material/EventBusyRounded";
 import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
+import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
@@ -36,6 +39,7 @@ import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
+import NotificationCenter from "../components/NotificationCenter";
 import formatArticleCode from "../utils/formatArticle";
 
 export default function AdminDashboard() {
@@ -51,6 +55,20 @@ export default function AdminDashboard() {
   const [approvedLoading, setApprovedLoading] = useState(true);
   const [approvedFeedback, setApprovedFeedback] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const notificationCenterRef = useRef(null);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const theme = useTheme();
+
+  const monthlyRequests = useMemo(
+    () => importMetrics?.monthlyRequests ?? [],
+    [importMetrics]
+  );
+
+  const topArticleGroups = useMemo(() => {
+    const groups = importMetrics?.articleGroups ?? [];
+    return groups.slice(0, 8);
+  }, [importMetrics]);
 
   const loadImportMetrics = async () => {
     setImportMetricsLoading(true);
@@ -429,7 +447,18 @@ export default function AdminDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <NotificationPermissionBanner />
+          <Stack spacing={2}>
+            <NotificationPermissionBanner
+              onEnabled={() => notificationCenterRef.current?.reload()}
+            />
+            <NotificationCenter
+              ref={notificationCenterRef}
+              onUnreadCountChange={setUnreadNotifications}
+              onLoadingChange={setNotificationsLoading}
+              description="Receive instant alerts when approvers update requests or propose new arrival dates."
+              emptyMessage="No unread updates at the moment."
+            />
+          </Stack>
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
               <StatCard
@@ -474,7 +503,17 @@ export default function AdminDashboard() {
           )}
 
           <Grid container spacing={3}>
-            <Grid item xs={12} md={3}>
+            <Grid item xs={12} sm={6} lg={3}>
+              <StatCard
+                icon={<NotificationsActiveRoundedIcon />}
+                label="Unread updates"
+                value={
+                  notificationsLoading ? "…" : unreadNotifications
+                }
+                trend="Review new approvals and changes from your team"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} lg={3}>
               <StatCard
                 icon={<ChecklistRoundedIcon />}
                 label="Total requests"
@@ -484,7 +523,7 @@ export default function AdminDashboard() {
                 trend="All submissions recorded in the system"
               />
             </Grid>
-            <Grid item xs={12} md={3}>
+            <Grid item xs={12} sm={6} lg={3}>
               <StatCard
                 icon={<EventAvailableRoundedIcon />}
                 label="Approved"
@@ -495,7 +534,7 @@ export default function AdminDashboard() {
                 color="secondary"
               />
             </Grid>
-            <Grid item xs={12} md={3}>
+            <Grid item xs={12} sm={6} lg={3}>
               <StatCard
                 icon={<ScheduleRoundedIcon />}
                 label="Pending"
@@ -506,9 +545,9 @@ export default function AdminDashboard() {
                 color="info"
               />
             </Grid>
-            <Grid item xs={12} md={3}>
+            <Grid item xs={12} sm={6} lg={3}>
               <StatCard
-                icon={<NotificationsActiveRoundedIcon />}
+                icon={<CalendarMonthRoundedIcon />}
                 label="Arrivals this week"
                 value={
                   importMetricsLoading ? "…" : importMetrics?.upcomingWeek ?? 0
@@ -607,39 +646,189 @@ export default function AdminDashboard() {
                 <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
                   <CircularProgress color="primary" />
                 </Box>
-              ) : importMetrics?.monthlyRequests?.length ? (
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 600 }}>Month</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>
-                        Requests
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>
-                        Boxes
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>
-                        Pallets
-                      </TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {importMetrics.monthlyRequests.map((entry) => (
-                      <TableRow key={entry.month} hover>
-                        <TableCell>{entry.month}</TableCell>
-                        <TableCell align="right">
-                          {entry.requestCount}
+              ) : monthlyRequests.length ? (
+                <Stack spacing={3}>
+                  <LineChart
+                    height={320}
+                    series={[
+                      {
+                        id: "requests",
+                        label: "Requests",
+                        data: monthlyRequests.map(
+                          (entry) => entry.requestCount ?? 0
+                        ),
+                        color: theme.palette.primary.main,
+                        curve: "monotoneX",
+                      },
+                      {
+                        id: "boxes",
+                        label: "Boxes",
+                        data: monthlyRequests.map((entry) => entry.boxTotal ?? 0),
+                        color: theme.palette.secondary.main,
+                        curve: "monotoneX",
+                      },
+                      {
+                        id: "pallets",
+                        label: "Pallets",
+                        data: monthlyRequests.map(
+                          (entry) => entry.palletTotal ?? 0
+                        ),
+                        color: theme.palette.info.main,
+                        curve: "monotoneX",
+                      },
+                    ]}
+                    xAxis={[
+                      {
+                        scaleType: "band",
+                        data: monthlyRequests.map((entry) => entry.month),
+                      },
+                    ]}
+                    margin={{ top: 40, left: 60, right: 20, bottom: 40 }}
+                    slotProps={{
+                      legend: {
+                        direction: "row",
+                        position: { vertical: "top", horizontal: "right" },
+                      },
+                    }}
+                  />
+                  <Divider />
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 600 }}>Month</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          Requests
                         </TableCell>
-                        <TableCell align="right">{entry.boxTotal}</TableCell>
-                        <TableCell align="right">{entry.palletTotal}</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          Boxes
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          Pallets
+                        </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHead>
+                    <TableBody>
+                      {monthlyRequests.map((entry) => (
+                        <TableRow key={entry.month} hover>
+                          <TableCell>{entry.month}</TableCell>
+                          <TableCell align="right">
+                            {entry.requestCount}
+                          </TableCell>
+                          <TableCell align="right">{entry.boxTotal}</TableCell>
+                          <TableCell align="right">{entry.palletTotal}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Stack>
               ) : (
                 <Typography variant="body2" color="text.secondary">
                   No historical data available yet. New submissions will
                   populate this view automatically.
+                </Typography>
+              )}
+            </Stack>
+          </Paper>
+
+          <Paper
+            elevation={10}
+            sx={{
+              p: { xs: 3, md: 5 },
+              borderRadius: 4,
+              background: (theme) =>
+                `linear-gradient(160deg, ${theme.palette.common.white} 0%, ${theme.palette.grey[100]} 100%)`,
+            }}
+          >
+            <Stack spacing={3}>
+              <Stack spacing={0.5}>
+                <Typography variant="h6">Top articles by volume</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Understand which articles dominate requests to align warehouse
+                  capacity and approvals.
+                </Typography>
+              </Stack>
+
+              {importMetricsLoading ? (
+                <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                  <CircularProgress color="primary" />
+                </Box>
+              ) : topArticleGroups.length ? (
+                <Stack spacing={3}>
+                  <BarChart
+                    height={360}
+                    xAxis={[
+                      {
+                        scaleType: "band",
+                        data: topArticleGroups.map((entry) => entry.article),
+                      },
+                    ]}
+                    series={[
+                      {
+                        id: "boxes",
+                        label: "Boxes",
+                        data: topArticleGroups.map((entry) => entry.boxTotal ?? 0),
+                        color: theme.palette.primary.main,
+                      },
+                      {
+                        id: "pallets",
+                        label: "Pallets",
+                        data: topArticleGroups.map(
+                          (entry) => entry.palletTotal ?? 0
+                        ),
+                        color: theme.palette.secondary.main,
+                      },
+                    ]}
+                    margin={{ top: 40, left: 60, right: 20, bottom: 80 }}
+                    slotProps={{
+                      legend: {
+                        direction: "row",
+                        position: { vertical: "top", horizontal: "right" },
+                      },
+                    }}
+                  />
+                  <Divider />
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 600 }}>Article</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          Requests
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          Approved
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          Boxes
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 600 }}>
+                          Pallets
+                        </TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {topArticleGroups.map((entry) => (
+                        <TableRow key={entry.article} hover>
+                          <TableCell>{entry.article}</TableCell>
+                          <TableCell align="right">
+                            {entry.requestCount}
+                          </TableCell>
+                          <TableCell align="right">
+                            {entry.approvedCount}
+                          </TableCell>
+                          <TableCell align="right">{entry.boxTotal}</TableCell>
+                          <TableCell align="right">
+                            {entry.palletTotal}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No aggregated article insights are available yet. Once
+                  multiple requests are submitted this section will highlight
+                  trends automatically.
                 </Typography>
               )}
             </Stack>

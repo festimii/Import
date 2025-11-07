@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -26,6 +26,7 @@ import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
+import NotificationCenter from "../components/NotificationCenter";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -149,42 +150,9 @@ export default function RequesterDashboard() {
   const [comment, setComment] = useState("");
   const [feedback, setFeedback] = useState(null);
   const [submissionDetails, setSubmissionDetails] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [notificationsFeedback, setNotificationsFeedback] = useState(null);
+  const notificationCenterRef = useRef(null);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
-
-  const loadNotifications = async () => {
-    setNotificationsLoading(true);
-    setNotificationsFeedback(null);
-    try {
-      const res = await API.get("/notifications");
-      const unread = res.data.filter((notification) => !notification.ReadAt);
-      setNotifications(unread);
-    } catch (error) {
-      setNotificationsFeedback({
-        severity: "error",
-        message: "We couldn't load your notifications. Please try again.",
-      });
-    } finally {
-      setNotificationsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadNotifications();
-  }, []);
-
-  const handleNotificationDismiss = async (id) => {
-    try {
-      await API.patch(`/notifications/${id}/read`);
-      setNotifications((prev) => prev.filter((notification) => notification.ID !== id));
-    } catch (error) {
-      setNotificationsFeedback({
-        severity: "error",
-        message: "We couldn't update that notification. Please try again.",
-      });
-    }
-  };
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   const handleItemChange = (index, field, value) => {
     setItems((previous) =>
@@ -396,7 +364,9 @@ export default function RequesterDashboard() {
               <StatCard
                 icon={<NotificationsActiveRoundedIcon />}
                 label="Unread updates"
-                value={notificationsLoading ? "…" : notifications.length}
+                value={
+                  notificationsLoading ? "…" : unreadNotifications
+                }
                 trend="Dismiss updates as you review them"
               />
             </Grid>
@@ -421,27 +391,16 @@ export default function RequesterDashboard() {
           </Grid>
 
           <Stack spacing={2}>
-            <NotificationPermissionBanner onEnabled={loadNotifications} />
-            {notificationsFeedback && (
-              <Alert severity={notificationsFeedback.severity}>
-                {notificationsFeedback.message}
-              </Alert>
-            )}
-            {notificationsLoading ? (
-              <Alert severity="info">Checking for updates…</Alert>
-            ) : notifications.length === 0 ? (
-              <Alert severity="success">You're up to date with the latest changes.</Alert>
-            ) : (
-              notifications.map((notification) => (
-                <Alert
-                  key={notification.ID}
-                  severity="info"
-                  onClose={() => handleNotificationDismiss(notification.ID)}
-                >
-                  {notification.Message}
-                </Alert>
-              ))
-            )}
+            <NotificationPermissionBanner
+              onEnabled={() => notificationCenterRef.current?.reload()}
+            />
+            <NotificationCenter
+              ref={notificationCenterRef}
+              onUnreadCountChange={setUnreadNotifications}
+              onLoadingChange={setNotificationsLoading}
+              description="Review confirmations, arrival proposals and reminders from your collaborators."
+              emptyMessage="You're up to date with the latest changes."
+            />
           </Stack>
 
           <Paper
