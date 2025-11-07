@@ -3,8 +3,8 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const CONTACT_EMAIL = process.env.NOTIFICATIONS_CONTACT_EMAIL ||
-  "mailto:you@example.com";
+const CONTACT_EMAIL =
+  process.env.NOTIFICATIONS_CONTACT_EMAIL || "mailto:you@example.com";
 
 webpush.setVapidDetails(
   CONTACT_EMAIL,
@@ -82,10 +82,12 @@ export const createNotifications = async (
         .input("Message", safeMessage)
         .input("Type", type)
         .query(`INSERT INTO RequestNotifications (RequestID, Username, Message, Type)
-                OUTPUT INSERTED.ID, INSERTED.RequestID, INSERTED.Username,
-                       INSERTED.Message, INSERTED.Type, INSERTED.CreatedAt,
-                       INSERTED.ReadAt
-                VALUES (@RequestID, @Username, @Message, @Type)`);
+        OUTPUT INSERTED.ID, INSERTED.RequestID, INSERTED.Username,
+               INSERTED.Message, INSERTED.Type, INSERTED.CreatedAt,
+               INSERTED.ReadAt
+        SELECT @RequestID, Username, @Message, @Type
+        FROM Users
+        WHERE (@ExcludeUsername IS NULL OR Username <> @ExcludeUsername)`);
 
       if (result.recordset.length > 0) {
         inserted.push(result.recordset[0]);
@@ -111,4 +113,3 @@ export const createNotifications = async (
 
   return result.recordset;
 };
-
