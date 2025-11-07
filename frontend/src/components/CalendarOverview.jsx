@@ -23,6 +23,26 @@ import formatArticleCode from "../utils/formatArticle";
 
 const formatKey = (date) => format(date, "yyyy-MM-dd");
 
+const formatNumeric = (value, fractionDigits = 0) => {
+  if (value === null || value === undefined) return "N/A";
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "N/A";
+  return numericValue.toLocaleString(undefined, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+};
+
+const formatPercent = (value, fractionDigits = 1) => {
+  if (value === null || value === undefined) return "N/A";
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "N/A";
+  return `${numericValue.toLocaleString(undefined, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })}%`;
+};
+
 const CalendarOverview = ({
   title = "Confirmed arrivals overview",
   description,
@@ -216,13 +236,26 @@ const CalendarOverview = ({
                             return format(parsed, "MMMM d, yyyy");
                           })();
 
-                          const details = `Arrival: ${arrivalDate} • Boxes: ${
-                            request.BoxCount ?? "N/A"
-                          } • Pallets: ${
-                            request.PalletCount ?? "N/A"
-                          } • Request date: ${requestDate} • Confirmed by ${
-                            request.ConfirmedBy ?? "Unknown"
-                          }`;
+                          const details = [
+                            `Arrival: ${arrivalDate}`,
+                            `Boxes: ${formatNumeric(request.BoxCount)}`,
+                            `Pallets: ${formatNumeric(request.PalletCount)}`,
+                            `Full pallets: ${formatNumeric(request.FullPallets, 2)}`,
+                            `Remaining boxes: ${formatNumeric(request.RemainingBoxes)}`,
+                            `Total weight (kg): ${formatNumeric(
+                              request.TotalShipmentWeightKg,
+                              2
+                            )}`,
+                            `Total volume (m³): ${formatNumeric(
+                              request.TotalShipmentVolumeM3,
+                              3
+                            )}`,
+                            `Utilization: ${formatPercent(
+                              request.PalletVolumeUtilization
+                            )}`,
+                            `Request date: ${requestDate}`,
+                            `Confirmed by ${request.ConfirmedBy ?? "Unknown"}`,
+                          ].join(" • ");
 
                           if (!request.Comment) {
                             return details;
