@@ -668,7 +668,7 @@ router.get(
                          LastSyncedAt
                   FROM WmsOrders
                   WHERE ArrivalDate IS NOT NULL
-                  AND OrderTypeCode = 53`),
+                  AND OrderTypeCode = 51`),
       ]);
 
       res.json({
