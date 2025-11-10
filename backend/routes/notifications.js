@@ -3,7 +3,7 @@ import { poolPromise } from "../db.js";
 import { verifyRole } from "../middleware/auth.js";
 import {
   broadcastPushNotification,
-  createNotifications,
+  dispatchNotificationEvent,
   getPublicKey,
   storeSubscription,
 } from "../services/notifications.js";
@@ -124,29 +124,24 @@ router.post("/create", verifyRole(allowedRoles), async (req, res) => {
       }
     }
 
-    const created = await createNotifications(pool, {
+    const roleAudience =
+      Array.isArray(AudienceRoles) && AudienceRoles.length > 0
+        ? AudienceRoles.filter(
+            (role) => typeof role === "string" && role.trim().length > 0
+          )
+        : undefined;
+
+    const { created, pushResults } = await dispatchNotificationEvent(pool, {
       requestId: RequestID,
       message: Message,
       type: Type || "info",
       usernames: explicitAudience.length > 0 ? explicitAudience : undefined,
-    });
-
-    const pushResults = await broadcastPushNotification(
-      {
-        title: "📦 Import Tracker",
+      roles: roleAudience,
+      push: {
         body: Message || "A new import request requires your attention.",
-        data: {
-          requestId: RequestID,
-          type: Type || "info",
-          createdAt: new Date().toISOString(),
-        },
-        actions: [
-          { action: "open", title: "Open Dashboard" },
-          { action: "dismiss", title: "Dismiss" },
-        ],
+        tag: "manual-" + RequestID + "-" + Date.now(),
       },
-      { notifyTeams: false }
-    );
+    });
 
     res.status(201).json({ notification: created, pushResults });
   } catch (err) {

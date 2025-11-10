@@ -3,10 +3,7 @@ import sql from "mssql";
 import { poolPromise } from "../db.js";
 import { secondaryPoolPromise } from "../db_WMS.js"; // secondary DB (pallet calculations)
 import { verifyRole } from "../middleware/auth.js";
-import {
-  broadcastPushNotification,
-  createNotifications,
-} from "../services/notifications.js";
+import { dispatchNotificationEvent } from "../services/notifications.js";
 import { ensureWmsOrdersSchema } from "../services/wmsOrdersSync.js";
 
 const router = express.Router();
@@ -49,6 +46,23 @@ const sanitizeComment = (value) => {
   }
 
   return stringValue.slice(0, 1000);
+};
+
+const formatNotificationDate = (value) => {
+  if (!value) {
+    return "TBD";
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().split("T")[0];
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  return "TBD";
 };
 
 const normalizePalletCalculation = (row = {}) => {
@@ -455,6 +469,38 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
 
     const responsePayload =
       insertedRecords.length === 1 ? insertedRecords[0] : insertedRecords;
+
+    if (insertedRecords.length > 0) {
+      const newRequestRoles = ["admin", "confirmer"];
+
+      for (const record of insertedRecords) {
+        const arrivalLabel = formatNotificationDate(record.ArrivalDate);
+        const importerLabel = record.Importer || "Unknown importer";
+        const articleLabel = record.Article || "N/A";
+        const message = `${req.user.username} submitted request #${record.ID} (${articleLabel}) for ${importerLabel} with arrival ${arrivalLabel}.`;
+
+        try {
+          await dispatchNotificationEvent(pool, {
+            requestId: record.ID,
+            message,
+            type: "request_created",
+            roles: newRequestRoles,
+            excludeUsername: req.user.username,
+            push: {
+              title: "New import request",
+              body: message,
+              data: { intent: "request_created" },
+              tag: "request-" + record.ID + "-created",
+            },
+          });
+        } catch (notificationError) {
+          console.error(
+            "Request creation notification error:",
+            notificationError.message
+          );
+        }
+      }
+    }
 
     res.json(responsePayload);
   } catch (err) {
@@ -1069,6 +1115,10 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     const [record] = mapArticles(result.recordset);
 
     const notificationsToDispatch = [];
+    const defaultNotificationRoles = ["admin", "confirmer"];
+    const requesterAudience = requesterUsername
+      ? [requesterUsername]
+      : undefined;
 
     if (arrivalDateSqlValue) {
       const previousDate = (() => {
@@ -1089,6 +1139,8 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         notificationsToDispatch.push({
           message,
           type: "arrival_date_change",
+          roles: defaultNotificationRoles,
+          usernames: requesterAudience,
         });
       }
     }
@@ -1113,33 +1165,32 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         notificationsToDispatch.push({
           message: statusMessage,
           type: `status_${normalizedStatus || "update"}`,
+          roles: defaultNotificationRoles,
+          usernames: requesterAudience,
         });
       }
     }
 
     for (const notification of notificationsToDispatch) {
       try {
-        const created = await createNotifications(pool, {
+        const intent = notification.intent || notification.type;
+
+        await dispatchNotificationEvent(pool, {
           requestId: record.ID,
           message: notification.message,
           type: notification.type,
+          usernames: notification.usernames || requesterAudience,
+          roles: notification.roles || defaultNotificationRoles,
           excludeUsername: req.user.username,
-        });
-
-        if (created.length > 0) {
-          await broadcastPushNotification(
-            {
-              title: "📦 Import Tracker",
-              body: notification.message,
-              data: {
-                requestId: record.ID,
-                type: notification.type,
-                createdAt: new Date().toISOString(),
-              },
+          push: {
+            title: "Import Tracker Update",
+            body: notification.message,
+            data: {
+              intent,
             },
-            { notifyTeams: false }
-          );
-        }
+            tag: "request-" + record.ID + "-" + intent,
+          },
+        });
       } catch (notificationError) {
         console.error(
           "Notification dispatch error:",
@@ -1147,7 +1198,6 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         );
       }
     }
-
     res.json(record);
   } catch (err) {
     console.error("Update error:", err.message);
