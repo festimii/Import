@@ -14,6 +14,49 @@ webpush.setVapidDetails(
 
 const subscriptions = new Map();
 
+const isNonEmptyString = (value) =>
+  typeof value === "string" && value.trim().length > 0;
+
+const normalizeUsername = (value) => {
+  if (!isNonEmptyString(value)) return null;
+  return value.trim();
+};
+
+const uniqueStrings = (values = []) => {
+  const set = new Set();
+
+  for (const value of values) {
+    const normalized = normalizeUsername(value);
+    if (normalized) {
+      set.add(normalized);
+    }
+  }
+
+  return Array.from(set);
+};
+
+const fetchRoleUsernames = async (pool, roles = []) => {
+  const filteredRoles = roles.filter(isNonEmptyString).map((role) => role.trim());
+
+  if (filteredRoles.length === 0) {
+    return [];
+  }
+
+  const request = pool.request();
+  const placeholders = [];
+
+  filteredRoles.forEach((role, index) => {
+    const param = `Role${index}`;
+    request.input(param, role);
+    placeholders.push(`@${param}`);
+  });
+
+  const query = `SELECT Username FROM Users WHERE Role IN (${placeholders.join(", ")})`;
+  const result = await request.query(query);
+
+  return uniqueStrings(result.recordset?.map((row) => row.Username) || []);
+};
+
 export const getPublicKey = () => process.env.PUBLIC_KEY || "";
 
 export const storeSubscription = (subscription) => {
@@ -110,4 +153,95 @@ export const createNotifications = async (
                    INSERTED.ReadAt`);
 
   return result.recordset;
+};
+
+export const dispatchNotificationEvent = async (
+  pool,
+  {
+    requestId,
+    message,
+    type = "info",
+    usernames,
+    roles,
+    excludeUsername,
+    push,
+  } = {}
+) => {
+  if (!pool || typeof pool.request !== "function") {
+    throw new Error("A valid database connection pool is required.");
+  }
+
+  if (!requestId) {
+    throw new Error("A requestId is required to create a notification.");
+  }
+
+  const stringMessage = isNonEmptyString(message)
+    ? message.trim()
+    : typeof message === "string"
+    ? message
+    : message === undefined || message === null
+    ? ""
+    : String(message);
+
+  if (!isNonEmptyString(stringMessage)) {
+    throw new Error("A message is required to create a notification.");
+  }
+
+  const audience = new Set(uniqueStrings(usernames));
+
+  if (Array.isArray(roles) && roles.length > 0) {
+    const roleUsernames = await fetchRoleUsernames(pool, roles);
+    for (const username of roleUsernames) {
+      audience.add(username);
+    }
+  }
+
+  const excluded = normalizeUsername(excludeUsername);
+  if (excluded) {
+    audience.delete(excluded);
+  }
+
+  if (audience.size === 0 && !excluded) {
+    throw new Error("No valid notification audience provided.");
+  }
+
+  const notificationPayload = {
+    requestId,
+    message: stringMessage,
+    type,
+  };
+
+  if (audience.size > 0) {
+    notificationPayload.usernames = Array.from(audience);
+  } else if (excluded) {
+    notificationPayload.excludeUsername = excluded;
+  }
+
+  const created = await createNotifications(pool, notificationPayload);
+
+  let pushResults;
+
+  if (push && typeof push === "object") {
+    const payload = {
+      title: push.title || "Import Tracker",
+      body: push.body || stringMessage,
+      data: { ...((push && push.data) || {}), requestId },
+    };
+
+    if (push.tag) {
+      payload.tag = push.tag;
+    }
+
+    if (push.renotify !== undefined) {
+      payload.renotify = push.renotify;
+    }
+
+    if (Array.isArray(push.actions)) {
+      payload.actions = push.actions;
+    }
+
+    pushResults = await broadcastPushNotification(payload);
+  }
+
+  return { created, pushResults };
 };
