@@ -125,7 +125,10 @@ const CalendarOverview = ({
   }, [wmsOrders]);
 
   const eventsForSelectedDate = useMemo(() => {
-    if (!(selectedDate instanceof Date) || Number.isNaN(selectedDate.getTime())) {
+    if (
+      !(selectedDate instanceof Date) ||
+      Number.isNaN(selectedDate.getTime())
+    ) {
       return { confirmed: [], wms: [] };
     }
 
@@ -144,7 +147,10 @@ const CalendarOverview = ({
   }, [eventsForSelectedDate]);
 
   const formattedSelectedDate = useMemo(() => {
-    if (!(selectedDate instanceof Date) || Number.isNaN(selectedDate.getTime())) {
+    if (
+      !(selectedDate instanceof Date) ||
+      Number.isNaN(selectedDate.getTime())
+    ) {
       return "Select a date";
     }
 
@@ -247,8 +253,11 @@ const CalendarOverview = ({
         p: { xs: 3, md: 5 },
         borderRadius: 4,
         background: (theme) =>
-          `linear-gradient(160deg, ${theme.palette.background.paper} 0%, ${alpha(theme.palette.primary.main, 0.06)} 100%)`,
-        border: (theme) => `1px solid ${alpha(theme.palette.primary.main, 0.08)}`,
+          `linear-gradient(160deg, ${
+            theme.palette.background.paper
+          } 0%, ${alpha(theme.palette.primary.main, 0.06)} 100%)`,
+        border: (theme) =>
+          `1px solid ${alpha(theme.palette.primary.main, 0.08)}`,
         ...(sx ?? {}),
       }}
     >
@@ -262,14 +271,20 @@ const CalendarOverview = ({
           )}
         </Box>
 
-        {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+        {feedback && (
+          <Alert severity={feedback.severity}>{feedback.message}</Alert>
+        )}
 
         {loading ? (
           <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
             <CircularProgress color="primary" />
           </Box>
         ) : (
-          <Stack direction={{ xs: "column", md: "row" }} spacing={4} alignItems="stretch">
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={4}
+            alignItems="stretch"
+          >
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DateCalendar
                 value={selectedDate}
@@ -323,7 +338,10 @@ const CalendarOverview = ({
                               backgroundColor: (theme) =>
                                 alpha(theme.palette.error.main, 0.08),
                               border: (theme) =>
-                                `1px solid ${alpha(theme.palette.error.main, 0.25)}`,
+                                `1px solid ${alpha(
+                                  theme.palette.error.main,
+                                  0.25
+                                )}`,
                             }}
                           >
                             <ListItemText
@@ -346,7 +364,9 @@ const CalendarOverview = ({
 
                                 const sourceUpdated = (() => {
                                   if (!order.SourceUpdatedAt) return null;
-                                  const parsed = new Date(order.SourceUpdatedAt);
+                                  const parsed = new Date(
+                                    order.SourceUpdatedAt
+                                  );
                                   if (Number.isNaN(parsed.getTime())) {
                                     return order.SourceUpdatedAt;
                                   }
@@ -356,13 +376,17 @@ const CalendarOverview = ({
                                 const details = [
                                   `Arrival: ${arrivalDate}`,
                                   order.Article
-                                    ? `Article: ${formatArticleCode(order.Article)}`
+                                    ? `Article: ${formatArticleCode(
+                                        order.Article
+                                      )}`
                                     : null,
                                   order.ArticleDescription
                                     ? `Description: ${order.ArticleDescription}`
                                     : null,
                                   `Boxes: ${formatNumeric(order.BoxCount)}`,
-                                  `Pallets: ${formatNumeric(order.PalletCount)}`,
+                                  `Pallets: ${formatNumeric(
+                                    order.PalletCount
+                                  )}`,
                                   sourceUpdated
                                     ? `Source updated: ${sourceUpdated}`
                                     : null,
@@ -376,9 +400,9 @@ const CalendarOverview = ({
                                   <span>
                                     {details.join(" • ")}
                                     <br />
-                                    <span style={{ whiteSpace: "pre-wrap" }}>
-                                      Note: {order.Comment}
-                                    </span>
+                                    <span
+                                      style={{ whiteSpace: "pre-wrap" }}
+                                    ></span>
                                   </span>
                                 );
                               })()}
@@ -410,13 +434,16 @@ const CalendarOverview = ({
                               backgroundColor: (theme) =>
                                 alpha(theme.palette.success.main, 0.08),
                               border: (theme) =>
-                                `1px solid ${alpha(theme.palette.success.main, 0.2)}`,
+                                `1px solid ${alpha(
+                                  theme.palette.success.main,
+                                  0.2
+                                )}`,
                             }}
                           >
                             <ListItemText
-                              primary={`${request.Importer} · ${formatArticleCode(
-                                request.Article
-                              )}`}
+                              primary={`${
+                                request.Importer
+                              } · ${formatArticleCode(request.Article)}`}
                               secondary={(() => {
                                 const requestDate = (() => {
                                   if (!request.RequestDate) return "N/A";
@@ -439,9 +466,16 @@ const CalendarOverview = ({
                                 const details = [
                                   `Arrival: ${arrivalDate}`,
                                   `Boxes: ${formatNumeric(request.BoxCount)}`,
-                                  `Pallets: ${formatNumeric(request.PalletCount)}`,
-                                  `Full pallets: ${formatNumeric(request.FullPallets, 2)}`,
-                                  `Remaining boxes: ${formatNumeric(request.RemainingBoxes)}`,
+                                  `Pallets: ${formatNumeric(
+                                    request.PalletCount
+                                  )}`,
+                                  `Full pallets: ${formatNumeric(
+                                    request.FullPallets,
+                                    2
+                                  )}`,
+                                  `Remaining boxes: ${formatNumeric(
+                                    request.RemainingBoxes
+                                  )}`,
                                   `Total weight (kg): ${formatNumeric(
                                     request.TotalShipmentWeightKg,
                                     2
@@ -454,7 +488,9 @@ const CalendarOverview = ({
                                     request.PalletVolumeUtilization
                                   )}`,
                                   `Request date: ${requestDate}`,
-                                  `Confirmed by ${request.ConfirmedBy ?? "Unknown"}`,
+                                  `Confirmed by ${
+                                    request.ConfirmedBy ?? "Unknown"
+                                  }`,
                                 ].join(" • ");
 
                                 if (!request.Comment) {
