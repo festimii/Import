@@ -21,7 +21,7 @@ import {
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import API from "../api";
-import formatArticleCode from "../utils/formatArticle";
+import formatArticleCode, { formatArticleLabel } from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
@@ -32,7 +32,12 @@ import NotificationCenter from "../components/NotificationCenter";
 const today = () => new Date().toISOString().split("T")[0];
 
 const SUMMARY_METRICS = [
-  { key: "totalBoxes", field: "BoxCount", label: "Total boxes", fractionDigits: 0 },
+  {
+    key: "totalBoxes",
+    field: "BoxCount",
+    label: "Total boxes",
+    fractionDigits: 0,
+  },
   {
     key: "totalPallets",
     field: "PalletCount",
@@ -100,7 +105,7 @@ const ITEM_COLUMNS = [
   {
     field: "Article",
     label: "Article",
-    format: (value) => formatArticleCode(value),
+    format: (value, row) => formatArticleLabel(value, row.ArticleName),
   },
   { field: "BoxCount", label: "Boxes", fractionDigits: 0 },
   { field: "PalletCount", label: "Pallets", fractionDigits: 0 },
@@ -179,7 +184,9 @@ export default function RequesterDashboard() {
   };
 
   const handleRemoveItem = (index) => {
-    setItems((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+    setItems((previous) =>
+      previous.filter((_, itemIndex) => itemIndex !== index)
+    );
   };
 
   const handleExcelChange = (event) => {
@@ -250,7 +257,9 @@ export default function RequesterDashboard() {
         if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
           setFeedback({
             severity: "error",
-            message: `Please provide a positive box quantity for item ${index + 1}.`,
+            message: `Please provide a positive box quantity for item ${
+              index + 1
+            }.`,
           });
           return;
         }
@@ -445,8 +454,8 @@ export default function RequesterDashboard() {
     });
   };
 
-  const formatDateValue = (value) => {
-    if (!value) return "—";
+  function formatDateValue(value) {
+    if (!value) return "N/A";
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) {
       return parsed.toLocaleDateString();
@@ -454,70 +463,24 @@ export default function RequesterDashboard() {
     if (typeof value === "string") {
       return value;
     }
-    return "—";
-  };
+    return "N/A";
+  }
 
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <PageHero
-        title="Requester workspace"
-        subtitle="Register new import requests with every required detail and keep tabs on confirmations in real time."
+        title="Stock Menagment"
+        subtitle=""
         actions={
           <Button variant="contained" color="secondary" onClick={logout}>
             Logout
           </Button>
         }
-      >
-        <Paper
-          elevation={0}
-          sx={{
-            p: 3,
-            color: "inherit",
-            backgroundColor: "rgba(255,255,255,0.14)",
-            borderRadius: 3,
-            border: "1px solid rgba(255,255,255,0.25)",
-          }}
-        >
-          <Stack spacing={1}>
-            <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
-              Today's focus
-            </Typography>
-            <Typography variant="body1">
-              Submit the latest import details, then monitor responses from approvers in
-              your notifications feed below.
-            </Typography>
-          </Stack>
-        </Paper>
-      </PageHero>
+      ></PageHero>
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
-              <StatCard
-                icon={<NotificationsActiveRoundedIcon />}
-                label="Unread updates"
-                value={
-                  notificationsLoading ? "…" : unreadNotifications
-                }
-                trend="Dismiss updates as you review them"
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <StatCard
-                icon={<EventAvailableRoundedIcon />}
-                label="Planned arrival"
-                value={upcomingArrival}
-                trend="Pick your best estimate to help confirmers plan"
-                color="secondary"
-              />
-            </Grid>
-          </Grid>
-
-          <SectionCard
-            title="Live notifications"
-            description="Stay informed about approvals, proposals and reminders without leaving this workspace."
-          >
+          <SectionCard title="" description="">
             <Stack spacing={2}>
               <NotificationPermissionBanner
                 onEnabled={() => notificationCenterRef.current?.reload()}
@@ -526,52 +489,54 @@ export default function RequesterDashboard() {
                 ref={notificationCenterRef}
                 onUnreadCountChange={setUnreadNotifications}
                 onLoadingChange={setNotificationsLoading}
-                description="Review confirmations, arrival proposals and reminders from your collaborators."
+                description=""
                 emptyMessage="You're up to date with the latest changes."
               />
             </Stack>
           </SectionCard>
 
           <SectionCard
-            title="Create a new import order"
-            description="Provide the request date, importer and the list of article/box combinations (Sasia - Pako) to submit a complete record."
+            title="Krijo porosi te re"
+            description="Vendos detajet e porosise se importit per te filluar procesin e palletizimit dhe planifikimit te ardhjes."
           >
             <Stack spacing={4}>
-              {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
+              {feedback && (
+                <Alert severity={feedback.severity}>{feedback.message}</Alert>
+              )}
 
               <Box component="form" onSubmit={handleSubmit} noValidate>
                 <Stack spacing={3}>
                   <TextField
-                    label="Request date"
+                    label="Data Krijimit"
                     type="date"
                     value={currentDate}
                     disabled
                     InputLabelProps={{ shrink: true }}
-                    helperText="Automatically set to today's date"
+                    helperText=""
                     required
                     fullWidth
                   />
                   <TextField
-                    label="Importer"
+                    label="Furnitori"
                     value={importer}
                     onChange={(event) => setImporter(event.target.value)}
-                    placeholder="Importer name"
+                    placeholder="Furnitori i importit"
                     required
                     fullWidth
                   />
                   <TextField
-                    label="Arrival date (Data Arritjes)"
+                    label="Data Arritjes"
                     type="date"
                     value={arrivalDate}
                     onChange={(event) => setArrivalDate(event.target.value)}
                     InputLabelProps={{ shrink: true }}
-                    helperText="Choose when the import is expected to arrive"
+                    helperText="Data e parashikuar e arritjes ne depo"
                     required
                     fullWidth
                   />
                   <Stack spacing={2}>
                     <Typography variant="subtitle1">
-                      Articles in this order
+                      Artikujt e porosise
                     </Typography>
                     {items.map((item, index) => (
                       <Stack
@@ -591,7 +556,7 @@ export default function RequesterDashboard() {
                           justifyContent="space-between"
                         >
                           <Typography variant="subtitle2">
-                            Article {index + 1}
+                            Artikulli {index + 1}
                           </Typography>
                           {items.length > 1 && (
                             <Button
@@ -605,25 +570,33 @@ export default function RequesterDashboard() {
                           )}
                         </Stack>
                         <TextField
-                          label="Article"
+                          label="Sifra Artikulli"
                           value={item.article}
                           onChange={(event) =>
-                            handleItemChange(index, "article", event.target.value)
+                            handleItemChange(
+                              index,
+                              "article",
+                              event.target.value
+                            )
                           }
-                          placeholder="Describe the article"
-                          helperText="Article codes shorter than 6 digits are padded automatically"
+                          placeholder=""
+                          helperText="Artikulli qe ka me pak se 6 karaktere automatikisht i shtohen zero para tij"
                           required
                           fullWidth
                         />
                         <TextField
-                          label="Box quantity (Sasia - Pako)"
+                          label="Sasia - Pako"
                           type="number"
                           value={item.boxCount}
                           onChange={(event) =>
-                            handleItemChange(index, "boxCount", event.target.value)
+                            handleItemChange(
+                              index,
+                              "boxCount",
+                              event.target.value
+                            )
                           }
                           inputProps={{ min: 1 }}
-                          helperText="We calculate palletization automatically based on the box count"
+                          helperText="Kalkulimi behet ne baze te sasis se pakove automatikisht"
                           required
                           fullWidth
                         />
@@ -635,16 +608,17 @@ export default function RequesterDashboard() {
                       onClick={handleAddItem}
                       sx={{ alignSelf: "flex-start" }}
                     >
-                      Add another article
+                      Shto artikull tjeter
                     </Button>
                   </Stack>
                   <Stack spacing={1}>
                     <Typography variant="subtitle1">
-                      Import from Excel (optional)
+                      Import nga Excel (optional)
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Upload spreadsheets using the required template. When files are
-                      attached, the manual article list above is ignored.
+                      Vendosni exelin me te dhenat e artikujve per import
+                      automatik, nese zgjidhni kete opsion, fushat e artikujve
+                      me lart do te injorohen!
                     </Typography>
                     <Stack
                       direction={{ xs: "column", sm: "row" }}
@@ -668,19 +642,24 @@ export default function RequesterDashboard() {
                           color="secondary"
                           onClick={handleExcelClear}
                         >
-                          Clear files
+                          Anulo Exelin
                         </Button>
                       )}
                     </Stack>
                     {excelFiles.length > 0 && (
                       <Stack spacing={0.5}>
                         {excelFiles.map((file, index) => (
-                          <Typography key={`${file.name}-${index}`} variant="body2">
+                          <Typography
+                            key={`${file.name}-${index}`}
+                            variant="body2"
+                          >
                             {file.name}
                           </Typography>
                         ))}
                         <Typography variant="caption" color="text.secondary">
-                          {`Manual entries are ignored while ${excelFiles.length} file${
+                          {`Manual entries are ignored while ${
+                            excelFiles.length
+                          } file${
                             excelFiles.length === 1 ? "" : "s"
                           } are attached.`}
                         </Typography>
@@ -688,11 +667,11 @@ export default function RequesterDashboard() {
                     )}
                   </Stack>
                   <TextField
-                    label="Additional context"
+                    label="Vendos koment"
                     value={comment}
                     onChange={(event) => setComment(event.target.value)}
-                    placeholder="Share helpful notes for confirmers and admins"
-                    helperText="Optional. Visible to everyone reviewing the request."
+                    placeholder="Shto nje koment te perbashket per porosine"
+                    helperText="Vendos nje koment te perbashket per porosine"
                     multiline
                     minRows={3}
                     fullWidth
@@ -709,8 +688,8 @@ export default function RequesterDashboard() {
           </SectionCard>
 
           <CalendarOverview
-            title="Arrival schedule"
-            description="Browse the shared calendar of confirmed arrivals to stay informed about planned deliveries."
+            title="Calendari i Arritjeve te Konfirmuara"
+            description=" "
           />
 
           {latestItems.length > 0 && (
@@ -757,7 +736,9 @@ export default function RequesterDashboard() {
                       spacing={1}
                     >
                       <Stack spacing={0.25}>
-                        <Typography variant="subtitle1">Aggregated totals</Typography>
+                        <Typography variant="subtitle1">
+                          Aggregated totals
+                        </Typography>
                         <Typography variant="body2" color="text.secondary">
                           {summaryTotals.itemCount > 1
                             ? "Values include every article in your latest submission."
@@ -768,9 +749,13 @@ export default function RequesterDashboard() {
                         <Button
                           type="button"
                           size="small"
-                          onClick={() => setShowAdvancedTotals((previous) => !previous)}
+                          onClick={() =>
+                            setShowAdvancedTotals((previous) => !previous)
+                          }
                         >
-                          {showAdvancedTotals ? "Hide advanced metrics" : "Show advanced metrics"}
+                          {showAdvancedTotals
+                            ? "Hide advanced metrics"
+                            : "Show advanced metrics"}
                         </Button>
                       )}
                     </Stack>
@@ -798,11 +783,15 @@ export default function RequesterDashboard() {
                     justifyContent="space-between"
                     spacing={1}
                   >
-                    <Typography variant="subtitle1">Per-article breakdown</Typography>
+                    <Typography variant="subtitle1">
+                      Per-article breakdown
+                    </Typography>
                     <Button
                       type="button"
                       size="small"
-                      onClick={() => setShowItemBreakdown((previous) => !previous)}
+                      onClick={() =>
+                        setShowItemBreakdown((previous) => !previous)
+                      }
                     >
                       {showItemBreakdown ? "Hide table" : "Show table"}
                     </Button>
@@ -817,37 +806,52 @@ export default function RequesterDashboard() {
                         borderColor: "divider",
                       }}
                     >
-                    <Table size="small" stickyHeader aria-label="Palletization details">
-                      <TableHead>
-                        <TableRow>
-                          {ITEM_COLUMNS.map((column) => (
-                            <TableCell key={column.field} sx={{ whiteSpace: "nowrap" }}>
-                              {column.label}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {latestItems.map((item) => (
-                          <TableRow
-                            key={item.ID ?? `${item.Article}-${item.BoxCount}`}
-                            hover
-                          >
-                            {ITEM_COLUMNS.map((column) => {
-                              const rawValue = item[column.field];
-                              const content = column.format
-                                ? column.format(rawValue, item)
-                                : formatQuantity(rawValue, column.fractionDigits ?? 0);
-                              return (
-                                <TableCell key={column.field} sx={{ whiteSpace: "nowrap" }}>
-                                  {content}
-                                </TableCell>
-                              );
-                            })}
+                      <Table
+                        size="small"
+                        stickyHeader
+                        aria-label="Palletization details"
+                      >
+                        <TableHead>
+                          <TableRow>
+                            {ITEM_COLUMNS.map((column) => (
+                              <TableCell
+                                key={column.field}
+                                sx={{ whiteSpace: "nowrap" }}
+                              >
+                                {column.label}
+                              </TableCell>
+                            ))}
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHead>
+                        <TableBody>
+                          {latestItems.map((item) => (
+                            <TableRow
+                              key={
+                                item.ID ?? `${item.Article}-${item.BoxCount}`
+                              }
+                              hover
+                            >
+                              {ITEM_COLUMNS.map((column) => {
+                                const rawValue = item[column.field];
+                                const content = column.format
+                                  ? column.format(rawValue, item)
+                                  : formatQuantity(
+                                      rawValue,
+                                      column.fractionDigits ?? 0
+                                    );
+                                return (
+                                  <TableCell
+                                    key={column.field}
+                                    sx={{ whiteSpace: "nowrap" }}
+                                  >
+                                    {content}
+                                  </TableCell>
+                                );
+                              })}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     </TableContainer>
                   </Collapse>
                 </Stack>

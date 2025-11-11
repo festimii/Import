@@ -1,4 +1,4 @@
-import{ useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -31,7 +31,6 @@ import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 import NotificationCenter from "../components/NotificationCenter";
-import formatArticleCode from "../utils/formatArticle";
 
 export default function ConfirmerDashboard() {
   const [requests, setRequests] = useState([]);
@@ -278,7 +277,7 @@ export default function ConfirmerDashboard() {
   };
 
   const pendingCount = groupedRequests.length;
-const awaitingSchedule = useMemo(() => {
+  const awaitingSchedule = useMemo(() => {
     if (groupedRequests.length === 0) return 0;
     return groupedRequests.filter((group) => {
       if (group.arrivalDateConflict) {
@@ -294,42 +293,18 @@ const awaitingSchedule = useMemo(() => {
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <PageHero
-        title="Confirmer workspace"
-        subtitle="Review pending import requests, confirm arrivals and keep the calendar accurate for every stakeholder."
+        title="VIVA Fresh Imports Tracker"
+        subtitle=""
         actions={
           <Button variant="contained" color="secondary" onClick={logout}>
             Logout
           </Button>
         }
-      >
-        <Paper
-          elevation={0}
-          sx={{
-            p: 3,
-            color: "inherit",
-            backgroundColor: "rgba(255,255,255,0.14)",
-            borderRadius: 3,
-            border: "1px solid rgba(255,255,255,0.25)",
-          }}
-        >
-          <Stack spacing={1}>
-            <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
-              Daily reminder
-            </Typography>
-            <Typography variant="body1">
-              Prioritize requests with upcoming arrivals and communicate any
-              schedule changes promptly.
-            </Typography>
-          </Stack>
-        </Paper>
-      </PageHero>
+      ></PageHero>
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <SectionCard
-            title="Live notifications"
-            description="Keep approvals, rejections and proposed schedules in one tidy feed."
-          >
+          <SectionCard title="" description="">
             <Stack spacing={2}>
               <NotificationPermissionBanner
                 onEnabled={() => notificationCenterRef.current?.reload()}
@@ -338,7 +313,7 @@ const awaitingSchedule = useMemo(() => {
                 ref={notificationCenterRef}
                 onUnreadCountChange={setUnreadNotifications}
                 onLoadingChange={setNotificationsLoading}
-                description="Keep track of approvals, rejections and proposed schedules that need your attention."
+                description=""
                 emptyMessage="You're caught up with the latest updates."
               />
             </Stack>
@@ -346,36 +321,6 @@ const awaitingSchedule = useMemo(() => {
           {feedback && (
             <Alert severity={feedback.severity}>{feedback.message}</Alert>
           )}
-
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<NotificationsActiveRoundedIcon />}
-                label="Unread updates"
-                value={
-                  notificationsLoading ? "…" : unreadNotifications
-                }
-                trend="Dismiss notifications as you review each request"
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<AssignmentTurnedInRoundedIcon />}
-                label="Pending decisions"
-                value={loading ? "…" : pendingCount}
-                trend="Approve or reject grouped requests to keep freight moving"
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<ScheduleRoundedIcon />}
-                label="Awaiting schedule"
-                value={loading ? "…" : awaitingSchedule}
-                trend="Propose a new arrival date when necessary"
-                color="info"
-              />
-            </Grid>
-          </Grid>
 
           {loading ? (
             <Paper
@@ -426,10 +371,7 @@ const awaitingSchedule = useMemo(() => {
             </Grid>
           )}
 
-          <CalendarOverview
-            title="Confirmed arrivals calendar"
-            description="Reference the shared calendar of approved arrivals before confirming new proposals."
-          />
+          <CalendarOverview title="Calendar overview" description="" />
         </Stack>
       </Container>
 

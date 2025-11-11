@@ -14,7 +14,7 @@ import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import EventRepeatRoundedIcon from "@mui/icons-material/EventRepeatRounded";
 import LocalShippingRoundedIcon from "@mui/icons-material/LocalShippingRounded";
-import formatArticleCode from "../utils/formatArticle";
+import { formatArticleLabel } from "../utils/formatArticle";
 
 export default function RequestCard({ req, onDecision, onProposeDate }) {
   const theme = useTheme();
@@ -38,7 +38,7 @@ export default function RequestCard({ req, onDecision, onProposeDate }) {
     }
   }
 
-  const articleValue = formatArticleCode(req.Article);
+  const articleValue = formatArticleLabel(req.Article, req.ArticleName);
   const statusLabel = req.Status ? req.Status : "pending";
 
   const formatQuantity = (value, fractionDigits = 0) => {

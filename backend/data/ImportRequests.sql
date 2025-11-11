@@ -11,6 +11,7 @@ CREATE TABLE [dbo].[ImportRequests](
     [DataArritjes] DATETIME NULL,                          -- arrival date
     [Importuesi] NVARCHAR(100) NOT NULL,                  -- importer name
     [Artikulli] NVARCHAR(255) NOT NULL,                   -- article name or code
+    [ArticleName] NVARCHAR(255) NULL,                     -- descriptive article label (ImeArt)
     [NumriPakove] INT NOT NULL DEFAULT (0),               -- number of boxes (Sasia - Pako)
     [NumriPaletave] INT NOT NULL DEFAULT (0),             -- total pallet positions (calculated)
     [BoxesPerPallet] DECIMAL(18, 6) NULL,

@@ -20,9 +20,14 @@ import { DateCalendar } from "@mui/x-date-pickers/DateCalendar";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { PickersDay } from "@mui/x-date-pickers/PickersDay";
 import { alpha } from "@mui/material/styles";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import Diversity3Icon from "@mui/icons-material/Diversity3";
+import Inventory2Icon from "@mui/icons-material/Inventory2";
+import LocalShippingIcon from "@mui/icons-material/LocalShipping";
+import ViewInArIcon from "@mui/icons-material/ViewInAr";
 import { format } from "date-fns";
 import API from "../api";
-import formatArticleCode from "../utils/formatArticle";
+import { formatArticleLabel } from "../utils/formatArticle";
 
 const formatKey = (date) => format(date, "yyyy-MM-dd");
 
@@ -152,30 +157,44 @@ const CalendarOverview = ({
     return format(selectedDate, "MMMM d, yyyy");
   }, [selectedDate]);
   const selectedAggregates = useMemo(() => {
-    const combined = [
-      ...eventsForSelectedDate.confirmed,
-      ...eventsForSelectedDate.wms,
-    ];
-    const sumField = (field) =>
-      combined.reduce((acc, item) => {
+    const confirmed = eventsForSelectedDate.confirmed ?? [];
+    const wms = eventsForSelectedDate.wms ?? [];
+    const combined = [...confirmed, ...wms];
+    const sumField = (collection, field) =>
+      collection.reduce((acc, item) => {
         const value = Number(item[field]);
         return Number.isFinite(value) ? acc + value : acc;
       }, 0);
+    const confirmedBoxes = sumField(confirmed, "BoxCount");
+    const wmsBoxes = sumField(wms, "BoxCount");
+    const confirmedPallets = sumField(confirmed, "PalletCount");
+    const wmsPallets = sumField(wms, "PalletCount");
     const uniqueImporters = new Set(
       combined.map((item) => item.Importer).filter(Boolean)
     );
     return {
       combinedCount: combined.length,
-      confirmedCount: eventsForSelectedDate.confirmed.length,
-      wmsCount: eventsForSelectedDate.wms.length,
-      totalBoxes: sumField("BoxCount"),
-      totalPallets: sumField("PalletCount"),
+      confirmedCount: confirmed.length,
+      wmsCount: wms.length,
+      totalBoxes: confirmedBoxes + wmsBoxes,
+      totalPallets: confirmedPallets + wmsPallets,
       uniqueImporters: uniqueImporters.size,
+      breakdown: {
+        boxes: {
+          confirmed: confirmedBoxes,
+          wms: wmsBoxes,
+        },
+        pallets: {
+          confirmed: confirmedPallets,
+          wms: wmsPallets,
+        },
+      },
     };
   }, [eventsForSelectedDate]);
   const quickStats = useMemo(() => {
     const stats = [
       {
+        key: "selected-date",
         label: "Selected date",
         value: formattedSelectedDate,
         caption: selectedAggregates.combinedCount
@@ -183,43 +202,81 @@ const CalendarOverview = ({
               selectedAggregates.combinedCount === 1 ? "" : "s"
             }`
           : "No arrivals scheduled",
+        icon: CalendarMonthIcon,
       },
     ];
 
-    if (selectedAggregates.confirmedCount > 0) {
+    if (selectedAggregates.combinedCount > 0) {
       stats.push({
-        label: "Confirmed",
-        value: formatNumeric(selectedAggregates.confirmedCount),
-      });
-    }
-
-    if (selectedAggregates.wmsCount > 0) {
-      stats.push({
-        label: "WMS arrivals",
-        value: formatNumeric(selectedAggregates.wmsCount),
+        key: "arrivals",
+        label: "Arrivals",
+        value: formatNumeric(selectedAggregates.combinedCount),
+        caption: "Imports + WMS",
+        icon: LocalShippingIcon,
+        segments: [
+          {
+            key: "arrivals-imports",
+            label: "Imports",
+            value: formatNumeric(selectedAggregates.confirmedCount),
+            color: "success.main",
+          },
+          {
+            key: "arrivals-wms",
+            label: "WMS",
+            value: formatNumeric(selectedAggregates.wmsCount),
+            color: "error.main",
+          },
+        ],
       });
     }
 
     if (selectedAggregates.totalBoxes > 0) {
       stats.push({
+        key: "total-boxes",
         label: "Total boxes",
         value: formatNumeric(selectedAggregates.totalBoxes),
-        caption: "Confirmed + WMS",
+        caption: "Imports + WMS",
+        icon: Inventory2Icon,
+        segments: [
+          {
+            key: "boxes-imports",
+            label: "Imports",
+            value: formatNumeric(selectedAggregates.breakdown.boxes.confirmed),
+            color: "success.main",
+          },
+          {
+            key: "boxes-wms",
+            label: "WMS",
+            value: formatNumeric(selectedAggregates.breakdown.boxes.wms),
+            color: "error.main",
+          },
+        ],
       });
     }
 
     if (selectedAggregates.totalPallets > 0) {
       stats.push({
+        key: "total-pallets",
         label: "Total pallets",
         value: formatNumeric(selectedAggregates.totalPallets),
-        caption: "Confirmed + WMS",
-      });
-    }
-
-    if (selectedAggregates.uniqueImporters > 0) {
-      stats.push({
-        label: "Unique importers",
-        value: formatNumeric(selectedAggregates.uniqueImporters),
+        caption: "Imports + WMS",
+        icon: ViewInArIcon,
+        segments: [
+          {
+            key: "pallets-imports",
+            label: "Imports",
+            value: formatNumeric(
+              selectedAggregates.breakdown.pallets.confirmed
+            ),
+            color: "success.main",
+          },
+          {
+            key: "pallets-wms",
+            label: "WMS",
+            value: formatNumeric(selectedAggregates.breakdown.pallets.wms),
+            color: "error.main",
+          },
+        ],
       });
     }
 
@@ -310,9 +367,7 @@ const CalendarOverview = ({
   };
   const renderDetailRows = (details, options = {}) => {
     const { commentLabel = "Note" } = options;
-    const detailItems = Array.isArray(details)
-      ? details.filter(Boolean)
-      : [];
+    const detailItems = Array.isArray(details) ? details.filter(Boolean) : [];
     const hasComment = Boolean(options.comment);
     if (detailItems.length === 0 && !hasComment) {
       return null;
@@ -320,12 +375,7 @@ const CalendarOverview = ({
     return (
       <Stack spacing={0.75} sx={{ mt: 0.5 }}>
         {detailItems.length > 0 && (
-          <Stack
-            direction="row"
-            spacing={0.75}
-            useFlexGap
-            flexWrap="wrap"
-          >
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
             {detailItems.map((detail, index) => (
               <Chip
                 key={`${detail}-${index}`}
@@ -383,198 +433,276 @@ const CalendarOverview = ({
               },
             }}
           >
-            {quickStats.map((stat) => (
-              <Box
-                key={stat.label}
-                sx={{
-                  p: 2.5,
-                  borderRadius: 3,
-                  border: (theme) =>
-                    `1px solid ${alpha(theme.palette.primary.main, 0.12)}`,
-                  backgroundColor: (theme) =>
-                    alpha(theme.palette.primary.light, 0.08),
-                }}
-              >
-                <Typography
-                  variant="overline"
-                  sx={{ letterSpacing: 1.2, color: "text.secondary" }}
+            {quickStats.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <Box
+                  key={stat.key ?? stat.label}
+                  sx={{
+                    p: 3,
+                    borderRadius: 4,
+                    border: (theme) =>
+                      `1px solid ${alpha(theme.palette.primary.main, 0.15)}`,
+                    background: (theme) =>
+                      `linear-gradient(150deg, ${alpha(
+                        theme.palette.primary.light,
+                        0.12
+                      )} 0%, ${alpha(theme.palette.primary.main, 0.05)} 100%)`,
+                    boxShadow: (theme) =>
+                      `0 18px 38px ${alpha(theme.palette.primary.main, 0.12)}`,
+                    minHeight: 170,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 1,
+                  }}
                 >
-                  {stat.label}
-                </Typography>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  {stat.value}
-                </Typography>
-                {stat.caption && (
-                  <Typography variant="caption" color="text.secondary">
-                    {stat.caption}
-                  </Typography>
-                )}
-              </Box>
-                  ))}
-                </Box>
-              )}
-              {hasConfirmedArrivals && (
-                <Box>
+                  {Icon && (
+                    <Box
+                      sx={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 2,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: (theme) =>
+                          alpha(theme.palette.primary.main, 0.12),
+                        color: "primary.main",
+                      }}
+                    >
+                      <Icon fontSize="medium" />
+                    </Box>
+                  )}
                   <Typography
-                    variant="subtitle2"
-                    color="success.main"
-                    sx={{ mb: 1 }}
+                    variant="overline"
+                    sx={{ letterSpacing: 1.2, color: "text.secondary" }}
                   >
-                    Confirmed import requests (
-                    {eventsForSelectedDate.confirmed.length})
+                    {stat.label}
                   </Typography>
-                  <List
-                    dense
-                    disablePadding
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {stat.value}
+                  </Typography>
+                  {stat.caption && (
+                    <Typography variant="body2" color="text.secondary">
+                      {stat.caption}
+                    </Typography>
+                  )}
+                  {stat.segments && stat.segments.length > 0 && (
+                    <Stack
+                      direction="row"
+                      spacing={1.5}
+                      divider={
+                        <Divider
+                          flexItem
+                          orientation="vertical"
+                          sx={{
+                            borderColor: (theme) =>
+                              alpha(theme.palette.text.primary, 0.12),
+                          }}
+                        />
+                      }
+                      sx={{
+                        mt: "auto",
+                        p: 1.25,
+                        borderRadius: 3,
+                        backgroundColor: (theme) =>
+                          alpha(theme.palette.common.white, 0.65),
+                        backdropFilter: "blur(4px)",
+                      }}
+                    >
+                      {stat.segments.map((segment) => (
+                        <Stack
+                          key={segment.key ?? segment.label}
+                          spacing={0.25}
+                          sx={{ minWidth: 0 }}
+                        >
+                          <Typography variant="caption" color="text.secondary">
+                            {segment.label}
+                          </Typography>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{
+                              fontWeight: 600,
+                              color: segment.color ?? "text.primary",
+                            }}
+                          >
+                            {segment.value}
+                          </Typography>
+                        </Stack>
+                      ))}
+                    </Stack>
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+        )}
+        {hasConfirmedArrivals && (
+          <Box>
+            <Typography variant="subtitle2" color="success.main" sx={{ mb: 1 }}>
+              Confirmed import requests (
+              {eventsForSelectedDate.confirmed.length})
+            </Typography>
+            <List
+              dense
+              disablePadding
+              sx={{
+                display: "grid",
+                gap: 1.5,
+                gridTemplateColumns: {
+                  xs: "repeat(auto-fit, minmax(260px, 1fr))",
+                },
+                alignItems: "stretch",
+              }}
+            >
+              {eventsForSelectedDate.confirmed.map((request, index) => {
+                const requestDate = (() => {
+                  if (!request.RequestDate) return "N/A";
+                  const parsed = new Date(request.RequestDate);
+                  if (Number.isNaN(parsed.getTime())) {
+                    return request.RequestDate;
+                  }
+                  return format(parsed, "MMMM d, yyyy");
+                })();
+
+                const arrivalDate = (() => {
+                  if (!request.ArrivalDate) return "N/A";
+                  const parsed = new Date(request.ArrivalDate);
+                  if (Number.isNaN(parsed.getTime())) {
+                    return request.ArrivalDate;
+                  }
+                  return format(parsed, "MMMM d, yyyy");
+                })();
+
+                const chipItems = [
+                  arrivalDate && `Arrival: ${arrivalDate}`,
+                  Number.isFinite(Number(request.BoxCount))
+                    ? `Boxes: ${formatNumeric(request.BoxCount)}`
+                    : null,
+                  Number.isFinite(Number(request.PalletCount))
+                    ? `Pallets: ${formatNumeric(request.PalletCount)}`
+                    : null,
+                  request.ConfirmedBy
+                    ? `Confirmed by ${request.ConfirmedBy}`
+                    : null,
+                ].filter(Boolean);
+
+                const detailItems = [
+                  Number.isFinite(Number(request.FullPallets))
+                    ? `Full pallets: ${formatNumeric(request.FullPallets, 2)}`
+                    : null,
+                  Number.isFinite(Number(request.RemainingBoxes))
+                    ? `Remaining boxes: ${formatNumeric(
+                        request.RemainingBoxes
+                      )}`
+                    : null,
+                  Number.isFinite(Number(request.TotalShipmentWeightKg))
+                    ? `Total weight (kg): ${formatNumeric(
+                        request.TotalShipmentWeightKg,
+                        2
+                      )}`
+                    : null,
+                  Number.isFinite(Number(request.TotalShipmentVolumeM3))
+                    ? `Total volume (m3): ${formatNumeric(
+                        request.TotalShipmentVolumeM3,
+                        3
+                      )}`
+                    : null,
+                  Number.isFinite(Number(request.PalletVolumeUtilization))
+                    ? `Utilization: ${formatPercent(
+                        request.PalletVolumeUtilization
+                      )}`
+                    : null,
+                  requestDate && `Request date: ${requestDate}`,
+                ];
+
+                const detailKey = `confirmed-${request.ID ?? index}`;
+                const hasExpandedDetails =
+                  detailItems.some(Boolean) || Boolean(request.Comment);
+
+                return (
+                  <ListItem
+                    key={
+                      request.ID ?? `${index}-${request.Article ?? "article"}`
+                    }
+                    alignItems="flex-start"
+                    disableGutters
                     sx={{
-                      display: "grid",
-                      gap: 1.5,
-                      gridTemplateColumns: {
-                        xs: "repeat(auto-fit, minmax(260px, 1fr))",
-                      },
-                      alignItems: "stretch",
+                      borderRadius: 2,
+                      px: 1.5,
+                      py: 1,
+                      backgroundColor: (theme) =>
+                        alpha(theme.palette.success.main, 0.08),
+                      border: (theme) =>
+                        `1px solid ${alpha(theme.palette.success.main, 0.2)}`,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 0.5,
                     }}
                   >
-                    {eventsForSelectedDate.confirmed.map((request, index) => {
-                      const requestDate = (() => {
-                        if (!request.RequestDate) return "N/A";
-                        const parsed = new Date(request.RequestDate);
-                        if (Number.isNaN(parsed.getTime())) {
-                          return request.RequestDate;
-                        }
-                        return format(parsed, "MMMM d, yyyy");
-                      })();
-
-                      const arrivalDate = (() => {
-                        if (!request.ArrivalDate) return "N/A";
-                        const parsed = new Date(request.ArrivalDate);
-                        if (Number.isNaN(parsed.getTime())) {
-                          return request.ArrivalDate;
-                        }
-                        return format(parsed, "MMMM d, yyyy");
-                      })();
-
-                      const chipItems = [
-                        arrivalDate && `Arrival: ${arrivalDate}`,
-                        Number.isFinite(Number(request.BoxCount))
-                          ? `Boxes: ${formatNumeric(request.BoxCount)}`
-                          : null,
-                        Number.isFinite(Number(request.PalletCount))
-                          ? `Pallets: ${formatNumeric(request.PalletCount)}`
-                          : null,
-                        request.ConfirmedBy
-                          ? `Confirmed by ${request.ConfirmedBy}`
-                          : null,
-                      ].filter(Boolean);
-
-                      const detailItems = [
-                        Number.isFinite(Number(request.FullPallets))
-                          ? `Full pallets: ${formatNumeric(request.FullPallets, 2)}`
-                          : null,
-                        Number.isFinite(Number(request.RemainingBoxes))
-                          ? `Remaining boxes: ${formatNumeric(request.RemainingBoxes)}`
-                          : null,
-                        Number.isFinite(Number(request.TotalShipmentWeightKg))
-                          ? `Total weight (kg): ${formatNumeric(request.TotalShipmentWeightKg, 2)}`
-                          : null,
-                        Number.isFinite(Number(request.TotalShipmentVolumeM3))
-                          ? `Total volume (m3): ${formatNumeric(request.TotalShipmentVolumeM3, 3)}`
-                          : null,
-                        Number.isFinite(Number(request.PalletVolumeUtilization))
-                          ? `Utilization: ${formatPercent(request.PalletVolumeUtilization)}`
-                          : null,
-                        requestDate && `Request date: ${requestDate}`,
-                      ];
-
-                      const detailKey = `confirmed-${request.ID ?? index}`;
-                      const hasExpandedDetails =
-                        detailItems.some(Boolean) || Boolean(request.Comment);
-
-                      return (
-                        <ListItem
-                          key={request.ID ?? `${index}-${request.Article ?? "article"}`}
-                          alignItems="flex-start"
-                          disableGutters
-                          sx={{
-                            borderRadius: 2,
-                            px: 1.5,
-                            py: 1,
-                            backgroundColor: (theme) =>
-                              alpha(theme.palette.success.main, 0.08),
-                            border: (theme) =>
-                              `1px solid ${alpha(
-                                theme.palette.success.main,
-                                0.2
-                              )}`,
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 0.5,
-                          }}
-                        >
-                          <ListItemText
-                            primaryTypographyProps={{
-                              variant: "body2",
-                              fontWeight: 600,
-                              color: "text.primary",
-                            }}
-                            secondaryTypographyProps={{
-                              component: "div",
-                            }}
-                            primary={`${
-                              request.Importer ?? "Unknown importer"
-                            } - ${
-                              request.Article
-                                ? formatArticleCode(request.Article)
-                                : "Article N/A"
-                            }`}
-                            secondary={
-                              <Stack spacing={0.75}>
-                                {chipItems.length > 0 && (
-                                  <Stack
-                                    direction="row"
-                                    spacing={0.75}
-                                    useFlexGap
-                                    flexWrap="wrap"
-                                  >
-                                    {chipItems.map((chip) => (
-                                      <Chip
-                                        key={chip}
-                                        label={chip}
-                                        size="small"
-                                        variant="outlined"
-                                      />
-                                    ))}
-                                  </Stack>
-                                )}
-                                {hasExpandedDetails && (
-                                  <>
-                                    <Button
-                                      type="button"
-                                      size="small"
-                                      onClick={() => toggleExpanded(detailKey)}
-                                      sx={{ alignSelf: "flex-start" }}
-                                    >
-                                      {isExpanded(detailKey)
-                                        ? "Hide details"
-                                        : "Full metrics"}
-                                    </Button>
-                                    <Collapse in={isExpanded(detailKey)}>
-                                      {renderDetailRows(detailItems, {
-                                        comment: request.Comment,
-                                        commentLabel: "Note",
-                                      })}
-                                    </Collapse>
-                                  </>
-                                )}
-                              </Stack>
-                            }
-                          />
-                        </ListItem>
-                      );
-                    })}
-                  </List>
-                </Box>
-              )}
+                    <ListItemText
+                      primaryTypographyProps={{
+                        variant: "body2",
+                        fontWeight: 600,
+                        color: "text.primary",
+                      }}
+                      secondaryTypographyProps={{
+                        component: "div",
+                      }}
+                      primary={`${
+                        request.Importer ?? "Unknown importer"
+                      } - ${formatArticleLabel(
+                        request.Article,
+                        request.ArticleName
+                      )}`}
+                      secondary={
+                        <Stack spacing={0.75}>
+                          {chipItems.length > 0 && (
+                            <Stack
+                              direction="row"
+                              spacing={0.75}
+                              useFlexGap
+                              flexWrap="wrap"
+                            >
+                              {chipItems.map((chip) => (
+                                <Chip
+                                  key={chip}
+                                  label={chip}
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              ))}
+                            </Stack>
+                          )}
+                          {hasExpandedDetails && (
+                            <>
+                              <Button
+                                type="button"
+                                size="small"
+                                onClick={() => toggleExpanded(detailKey)}
+                                sx={{ alignSelf: "flex-start" }}
+                              >
+                                {isExpanded(detailKey)
+                                  ? "Hide details"
+                                  : "Full metrics"}
+                              </Button>
+                              <Collapse in={isExpanded(detailKey)}>
+                                {renderDetailRows(detailItems, {
+                                  comment: request.Comment,
+                                  commentLabel: "Note",
+                                })}
+                              </Collapse>
+                            </>
+                          )}
+                        </Stack>
+                      }
+                    />
+                  </ListItem>
+                );
+              })}
+            </List>
+          </Box>
+        )}
         {feedback && (
           <Alert severity={feedback.severity}>{feedback.message}</Alert>
         )}
@@ -660,7 +788,6 @@ const CalendarOverview = ({
                             return format(parsed, "MMMM d, yyyy");
                           })();
 
-
                           const sourceUpdated = (() => {
                             if (!order.SourceUpdatedAt) return null;
                             const parsed = new Date(order.SourceUpdatedAt);
@@ -670,11 +797,13 @@ const CalendarOverview = ({
                             return format(parsed, "MMMM d, yyyy HH:mm");
                           })();
 
-
                           const chipItems = [
                             arrivalDate && `Arrival: ${arrivalDate}`,
-                            order.Article
-                              ? `Article: ${formatArticleCode(order.Article)}`
+                            order.Article || order.ArticleDescription
+                              ? `Article: ${formatArticleLabel(
+                                  order.Article,
+                                  order.ArticleDescription
+                                )}`
                               : null,
                             Number.isFinite(Number(order.BoxCount))
                               ? `Boxes: ${formatNumeric(order.BoxCount)}`
@@ -684,16 +813,11 @@ const CalendarOverview = ({
                               : null,
                           ].filter(Boolean);
 
-
                           const detailItems = [
-                            order.ArticleDescription
-                              ? `Description: ${order.ArticleDescription}`
-                              : null,
                             sourceUpdated
                               ? `Source updated: ${sourceUpdated}`
                               : null,
                           ];
-
 
                           const detailKey = `wms-${
                             order.NarID ??
@@ -702,7 +826,6 @@ const CalendarOverview = ({
                           }`;
                           const hasExpandedDetails =
                             detailItems.some(Boolean) || Boolean(order.Comment);
-
 
                           return (
                             <ListItem
@@ -761,7 +884,6 @@ const CalendarOverview = ({
                                       </Stack>
                                     )}
 
-
                                     {hasExpandedDetails && (
                                       <>
                                         <Button
@@ -804,7 +926,3 @@ const CalendarOverview = ({
 };
 
 export default CalendarOverview;
-
-
-
-

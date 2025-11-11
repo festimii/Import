@@ -16,7 +16,8 @@ const highlights = [
   {
     icon: <TaskAltRoundedIcon fontSize="small" />,
     title: "Streamlined workflows",
-    description: "Submit, review and confirm imports without leaving the dashboard.",
+    description:
+      "Submit, review and confirm imports without leaving the dashboard.",
   },
   {
     icon: <SecurityRoundedIcon fontSize="small" />,
@@ -69,7 +70,7 @@ const AuthLayout = ({ title, subtitle, children, footer, accent }) => {
                   inset: 0,
                   opacity: 0.1,
                   background:
-                    "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.8) 0%, transparent 55%), radial-gradient(circle at 80% 80%, rgba(255,255,255,0.6) 0%, transparent 45%)",
+                    "radial-gradient(circle at 20% 20%, rgba(188, 67, 67, 0.8) 0%, transparent 55%), radial-gradient(circle at 80% 80%, rgba(255,255,255,0.6) 0%, transparent 45%)",
                 }}
               />
               <Stack
@@ -92,44 +93,20 @@ const AuthLayout = ({ title, subtitle, children, footer, accent }) => {
                       fontWeight: 600,
                     }}
                   />
-                  <Typography variant="h4" component="h2" sx={{ fontWeight: 600 }}>
-                    Built for cross-team collaboration
+                  <Typography
+                    variant="h4"
+                    component="h2"
+                    sx={{ fontWeight: 600 }}
+                  >
+                    VIVA FRESH
                   </Typography>
-                  <Typography variant="body1" sx={{ opacity: 0.9 }}>
-                    Coordinate requests, approvals and arrivals on a single, shared
-                    platform designed for import-focused teams.
-                  </Typography>
+                  <Typography
+                    variant="body1"
+                    sx={{ opacity: 0.9 }}
+                  ></Typography>
                 </Stack>
 
                 <Divider sx={{ borderColor: "rgba(255,255,255,0.3)" }} />
-
-                <Stack spacing={3}>
-                  {highlights.map((highlight) => (
-                    <Stack key={highlight.title} spacing={1}>
-                      <Stack direction="row" spacing={1.5} alignItems="center">
-                        <Box
-                          sx={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: "50%",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "rgba(255,255,255,0.15)",
-                          }}
-                        >
-                          {highlight.icon}
-                        </Box>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                          {highlight.title}
-                        </Typography>
-                      </Stack>
-                      <Typography variant="body2" sx={{ opacity: 0.85 }}>
-                        {highlight.description}
-                      </Typography>
-                    </Stack>
-                  ))}
-                </Stack>
               </Stack>
             </Grid>
 

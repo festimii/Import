@@ -138,6 +138,153 @@ const calculatePalletization = async (pool, { article, boxCount }) => {
   return normalizePalletCalculation(calculationRow);
 };
 
+const KAT_ART_TABLE = "KatArt";
+const KAT_ART_DEFAULT_SCHEMA = "dbo";
+const KAT_ART_CODE_PREFERENCES = [
+  "sifra_art",
+  "sifraart",
+  "artikal",
+  "article",
+  "artikulli",
+  "sifra",
+];
+const KAT_ART_NAME_PREFERENCES = [
+  "imeart",
+  "articlename",
+  "artikullpershkrimi",
+  "description",
+  "opis",
+  "naziv",
+];
+
+let katArtColumnCache = null;
+
+const quoteIdentifier = (value, fallback) => {
+  const identifier = String(value ?? fallback ?? "").trim();
+  if (!identifier) {
+    return "";
+  }
+  return `[${identifier.replace(/]/g, "]]")}]`;
+};
+
+const resolveKatArtColumns = async (pool) => {
+  if (katArtColumnCache) {
+    return katArtColumnCache;
+  }
+
+  try {
+    const result = await pool
+      .request()
+      .input("TableName", sql.NVarChar(128), KAT_ART_TABLE)
+      .query(`SELECT TABLE_SCHEMA, COLUMN_NAME
+              FROM INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_NAME = @TableName`);
+
+    if (!Array.isArray(result.recordset) || result.recordset.length === 0) {
+      katArtColumnCache = {
+        schemaName: KAT_ART_DEFAULT_SCHEMA,
+        codeColumn: "Sifra_Art",
+        nameColumn: "ImeArt",
+      };
+      return katArtColumnCache;
+    }
+
+    const columnLookup = new Map();
+    let schemaName = KAT_ART_DEFAULT_SCHEMA;
+
+    for (const row of result.recordset) {
+      if (row.TABLE_SCHEMA) {
+        schemaName = row.TABLE_SCHEMA;
+      }
+      const actualName = String(row.COLUMN_NAME);
+      columnLookup.set(actualName.toLowerCase(), actualName);
+    }
+
+    const resolveColumn = (preferences, fallback) => {
+      for (const candidate of preferences) {
+        const resolved = columnLookup.get(candidate);
+        if (resolved) {
+          return resolved;
+        }
+      }
+      return fallback;
+    };
+
+    katArtColumnCache = {
+      schemaName,
+      codeColumn: resolveColumn(KAT_ART_CODE_PREFERENCES, "Sifra_Art"),
+      nameColumn: resolveColumn(KAT_ART_NAME_PREFERENCES, "ImeArt"),
+    };
+
+    return katArtColumnCache;
+  } catch (error) {
+    katArtColumnCache = {
+      schemaName: KAT_ART_DEFAULT_SCHEMA,
+      codeColumn: "Sifra_Art",
+      nameColumn: "ImeArt",
+    };
+    return katArtColumnCache;
+  }
+};
+
+const fetchArticleNames = async (pool, articles = []) => {
+  if (!pool || !Array.isArray(articles) || articles.length === 0) {
+    return new Map();
+  }
+
+  const normalizedArticles = [
+    ...new Set(
+      articles
+        .map((article) => normalizeArticleCode(article))
+        .filter((value) => Boolean(value))
+    ),
+  ];
+
+  if (normalizedArticles.length === 0) {
+    return new Map();
+  }
+
+  try {
+    const { schemaName, codeColumn, nameColumn } = await resolveKatArtColumns(
+      pool
+    );
+    const quotedTable = `${quoteIdentifier(
+      schemaName,
+      KAT_ART_DEFAULT_SCHEMA
+    )}.${quoteIdentifier(KAT_ART_TABLE, KAT_ART_TABLE)}`;
+    const quotedCodeColumn = quoteIdentifier(codeColumn, "Sifra_Art");
+    const quotedNameColumn = quoteIdentifier(nameColumn, "ImeArt");
+
+    const request = pool.request();
+    const parameterPlaceholders = normalizedArticles.map((code, index) => {
+      const parameter = `Article${index}`;
+      request.input(parameter, sql.NVarChar(50), code);
+      return `@${parameter}`;
+    });
+
+    const result = await request.query(`SELECT
+            ${quotedCodeColumn} AS ArticleCode,
+            ${quotedNameColumn} AS ArticleName
+          FROM ${quotedTable}
+          WHERE ${quotedCodeColumn} IN (${parameterPlaceholders.join(", ")})`);
+
+    const lookup = new Map();
+    for (const row of result.recordset ?? []) {
+      const code = normalizeArticleCode(row.ArticleCode);
+      if (!code) {
+        continue;
+      }
+      const name = trimString(row.ArticleName);
+      lookup.set(code, name || null);
+    }
+
+    return lookup;
+  } catch (error) {
+    console.error("Article name lookup error:", error.message);
+    return new Map();
+  }
+};
+
 const NUMERIC_FIELDS = [
   "BoxCount",
   "PalletCount",
@@ -164,6 +311,7 @@ const mapArticles = (records) =>
     const mapped = {
       ...record,
       Article: normalizeArticleCode(record.Article),
+      ArticleName: trimString(record.ArticleName),
     };
 
     for (const field of NUMERIC_FIELDS) {
@@ -245,8 +393,7 @@ const tableExists = async (pool, tableName) => {
   const result = await pool
     .request()
     .input("TableSchema", sql.NVarChar, schema)
-    .input("TableName", sql.NVarChar, name)
-    .query(`
+    .input("TableName", sql.NVarChar, name).query(`
       SELECT CASE WHEN EXISTS (
         SELECT 1
         FROM INFORMATION_SCHEMA.TABLES
@@ -263,8 +410,7 @@ const columnExists = async (pool, tableName, columnName) => {
     .request()
     .input("TableSchema", sql.NVarChar, schema)
     .input("TableName", sql.NVarChar, name)
-    .input("ColumnName", sql.NVarChar, columnName)
-    .query(`
+    .input("ColumnName", sql.NVarChar, columnName).query(`
       SELECT CASE WHEN EXISTS (
         SELECT 1
         FROM INFORMATION_SCHEMA.COLUMNS
@@ -279,8 +425,7 @@ const columnExists = async (pool, tableName, columnName) => {
 const defaultConstraintExists = async (pool, constraintName) => {
   const result = await pool
     .request()
-    .input("ConstraintName", sql.NVarChar, constraintName)
-    .query(`
+    .input("ConstraintName", sql.NVarChar, constraintName).query(`
       SELECT CASE WHEN EXISTS (
         SELECT 1
         FROM sys.default_constraints
@@ -295,8 +440,7 @@ const indexExists = async (pool, tableName, indexName) => {
   const result = await pool
     .request()
     .input("TableName", sql.NVarChar, qualified)
-    .input("IndexName", sql.NVarChar, indexName)
-    .query(`
+    .input("IndexName", sql.NVarChar, indexName).query(`
       SELECT CASE WHEN EXISTS (
         SELECT 1
         FROM sys.indexes
@@ -499,6 +643,7 @@ const ensureImportRequestEnhancements = () => {
       const detailsTable = "dbo.ImportRequestExcelDetails";
       const batchColumn = "BatchId";
       const batchConstraint = "DF_ImportRequests_BatchId";
+      const articleNameColumn = "ArticleName";
 
       const ensureBatchColumn = async () => {
         const hasBatchColumn = await columnExists(
@@ -532,6 +677,21 @@ const ensureImportRequestEnhancements = () => {
             SET ${batchColumn} = COALESCE(${batchColumn}, NEWID())
             WHERE ${batchColumn} IS NULL;
           `);
+        }
+      };
+
+      const ensureArticleNameColumn = async () => {
+        const hasArticleName = await columnExists(
+          pool,
+          importTable,
+          articleNameColumn
+        );
+        if (!hasArticleName) {
+          await pool
+            .request()
+            .query(
+              `ALTER TABLE ${importTable} ADD ${articleNameColumn} NVARCHAR(255) NULL;`
+            );
         }
       };
 
@@ -654,6 +814,7 @@ const ensureImportRequestEnhancements = () => {
       };
 
       await ensureBatchColumn();
+      await ensureArticleNameColumn();
       await ensureDetailsTable();
     })();
 
@@ -712,7 +873,10 @@ const getImportRequestFeatureState = async () => {
   return importRequestFeatureState;
 };
 
-const insertExcelDetails = async (transaction, { requestId, batchId, meta }) => {
+const insertExcelDetails = async (
+  transaction,
+  { requestId, batchId, meta }
+) => {
   if (!meta) {
     return;
   }
@@ -829,19 +993,29 @@ const insertImportRequestItems = async ({
 
   const featureState = await getImportRequestFeatureState();
   const includeBatchId = featureState.hasBatchId;
-  const includeExcelDetails = featureState.hasBatchId && featureState.hasExcelDetails;
+  const includeExcelDetails =
+    featureState.hasBatchId && featureState.hasExcelDetails;
   const effectiveBatchId = includeBatchId ? batchId : null;
 
   const pool = await poolPromise;
   const secondaryPool = await secondaryPoolPromise;
   const transaction = new sql.Transaction(pool);
   const insertedRecords = [];
+  const articleNameLookup = await fetchArticleNames(
+    secondaryPool,
+    normalizedItems.map((item) => item.article)
+  );
 
   await transaction.begin();
 
   try {
     for (let index = 0; index < normalizedItems.length; index += 1) {
       const current = normalizedItems[index];
+      const fallbackArticleName =
+        (current.excelMeta && trimString(current.excelMeta.articleName)) ??
+        null;
+      const articleName =
+        articleNameLookup.get(current.article) ?? fallbackArticleName;
 
       let calculation = current.calculation ?? null;
       if (!calculation) {
@@ -877,6 +1051,7 @@ const insertImportRequestItems = async ({
         .input("DataArritjes", arrivalDateSqlValue)
         .input("Importuesi", importer)
         .input("Artikulli", current.article)
+        .input("ArticleName", articleName)
         .input("NumriPakove", current.boxCount)
         .input("NumriPaletave", palletCount)
         .input("BoxesPerPallet", calculation.boxesPerPallet ?? null)
@@ -892,14 +1067,8 @@ const insertImportRequestItems = async ({
           "PalletVolumeUtilization",
           calculation.palletVolumeUtilization ?? null
         )
-        .input(
-          "WeightFullPalletsKg",
-          calculation.weightFullPalletsKg ?? null
-        )
-        .input(
-          "VolumeFullPalletsM3",
-          calculation.volumeFullPalletsM3 ?? null
-        )
+        .input("WeightFullPalletsKg", calculation.weightFullPalletsKg ?? null)
+        .input("VolumeFullPalletsM3", calculation.volumeFullPalletsM3 ?? null)
         .input("WeightRemainingKg", calculation.weightRemainingKg ?? null)
         .input("VolumeRemainingM3", calculation.volumeRemainingM3 ?? null)
         .input(
@@ -922,6 +1091,7 @@ const insertImportRequestItems = async ({
               DataArritjes,
               Importuesi,
               Artikulli,
+              ArticleName,
               NumriPakove,
               NumriPaletave,
               BoxesPerPallet,
@@ -953,6 +1123,7 @@ const insertImportRequestItems = async ({
                    INSERTED.DataArritjes AS ArrivalDate,
                    INSERTED.Importuesi AS Importer,
                    INSERTED.Artikulli AS Article,
+                   INSERTED.ArticleName AS ArticleName,
                    INSERTED.NumriPakove AS BoxCount,
                    INSERTED.NumriPaletave AS PalletCount,
                    INSERTED.BoxesPerPallet,
@@ -986,6 +1157,7 @@ const insertImportRequestItems = async ({
               @DataArritjes,
               @Importuesi,
               @Artikulli,
+              @ArticleName,
               @NumriPakove,
               @NumriPaletave,
               @BoxesPerPallet,
@@ -1038,11 +1210,7 @@ const insertImportRequestItems = async ({
   }
 };
 
-const notifyRequestCreation = async ({
-  pool,
-  records,
-  initiatorUsername,
-}) => {
+const notifyRequestCreation = async ({ pool, records, initiatorUsername }) => {
   if (!records || records.length === 0) {
     return;
   }
@@ -1052,7 +1220,7 @@ const notifyRequestCreation = async ({
   for (const record of records) {
     const arrivalLabel = formatNotificationDate(record.ArrivalDate);
     const importerLabel = record.Importer || "Unknown importer";
-    const articleLabel = record.Article || "N/A";
+    const articleLabel = record.ArticleName || record.Article || "N/A";
     const message = `${initiatorUsername} submitted request #${record.ID} (${articleLabel}) for ${importerLabel} with arrival ${arrivalLabel}.`;
 
     try {
@@ -1429,6 +1597,7 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
                      DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
+                     ArticleName,
                      NumriPakove AS BoxCount,
                      NumriPaletave AS PalletCount,
                      BoxesPerPallet,
@@ -1478,6 +1647,7 @@ router.get(
                      DataArritjes AS ArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
+                     ArticleName,
                      NumriPakove AS BoxCount,
                      NumriPaletave AS PalletCount,
                      BoxesPerPallet,
@@ -1530,6 +1700,7 @@ router.get(
                          DataArritjes AS ArrivalDate,
                          Importuesi AS Importer,
                          Artikulli AS Article,
+                         ArticleName,
                          NumriPakove AS BoxCount,
                          NumriPaletave AS PalletCount,
                          BoxesPerPallet,
@@ -1650,6 +1821,7 @@ router.get(
 
       const articleGroupResult = await pool.request().query(`SELECT TOP 50
                        Artikulli AS Article,
+                       MAX(ArticleName) AS ArticleName,
                        COUNT(*) AS RequestCount,
                        SUM(CASE WHEN Status = 'approved' THEN 1 ELSE 0 END) AS ApprovedCount,
                        SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) AS PendingCount,
@@ -1662,6 +1834,7 @@ router.get(
 
       const articleGroups = articleGroupResult.recordset.map((row) => ({
         article: normalizeArticleCode(row.Article),
+        articleName: trimString(row.ArticleName),
         requestCount: Number(row.RequestCount ?? 0),
         approvedCount: Number(row.ApprovedCount ?? 0),
         pendingCount: Number(row.PendingCount ?? 0),
@@ -1991,6 +2164,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                    INSERTED.DataArritjes AS ArrivalDate,
                    INSERTED.Importuesi AS Importer,
                    INSERTED.Artikulli AS Article,
+                   INSERTED.ArticleName AS ArticleName,
                    INSERTED.NumriPakove AS BoxCount,
                    INSERTED.NumriPaletave AS PalletCount,
                    INSERTED.BoxesPerPallet,

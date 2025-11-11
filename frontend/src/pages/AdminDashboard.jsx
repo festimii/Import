@@ -34,6 +34,7 @@ import StatCard from "../components/StatCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 import NotificationCenter from "../components/NotificationCenter";
 import SectionCard from "../components/SectionCard";
+import { formatArticleLabel } from "../utils/formatArticle";
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
@@ -713,7 +714,9 @@ export default function AdminDashboard() {
                   xAxis={[
                     {
                       scaleType: "band",
-                      data: topArticleGroups.map((entry) => entry.article),
+                      data: topArticleGroups.map((entry) =>
+                        formatArticleLabel(entry.article, entry.articleName)
+                      ),
                     },
                   ]}
                   series={[
@@ -762,7 +765,9 @@ export default function AdminDashboard() {
                   <TableBody>
                     {topArticleGroups.map((entry) => (
                       <TableRow key={entry.article} hover>
-                        <TableCell>{entry.article}</TableCell>
+                        <TableCell>
+                          {formatArticleLabel(entry.article, entry.articleName)}
+                        </TableCell>
                         <TableCell align="right">
                           {entry.requestCount}
                         </TableCell>

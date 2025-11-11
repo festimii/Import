@@ -12,7 +12,7 @@ const app = express();
 app.use(
   cors({
     origin: "*", // allow all origins
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
@@ -31,6 +31,6 @@ startWmsOrdersSync();
 
 const PORT = 5000;
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "localhost", () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
 });

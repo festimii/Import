@@ -15,7 +15,7 @@ import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import EventRepeatRoundedIcon from "@mui/icons-material/EventRepeatRounded";
 import LocalShippingRoundedIcon from "@mui/icons-material/LocalShippingRounded";
-import formatArticleCode from "../utils/formatArticle";
+import { formatArticleLabel } from "../utils/formatArticle";
 
 const formatDate = (value) => {
   if (!value) return "—";
@@ -267,7 +267,7 @@ export default function RequestGroupCard({
                       >
                         <Box>
                           <Typography variant="body1" fontWeight={600}>
-                            {formatArticleCode(item.Article)}
+                            {formatArticleLabel(item.Article, item.ArticleName)}
                           </Typography>
                           {item.Comment && (
                             <Typography
