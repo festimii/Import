@@ -2,7 +2,9 @@ import sql from "mssql";
 import { poolPromise } from "../db.js";
 import { secondaryPoolPromise } from "../db_WMS.js";
 
-const SYNC_INTERVAL_MS = Number(process.env.WMS_SYNC_INTERVAL_MS ?? 5 * 60 * 1000);
+const SYNC_INTERVAL_MS = Number(
+  process.env.WMS_SYNC_INTERVAL_MS ?? 3 * 60 * 60 * 1000
+);
 const WMS_PROCEDURE_NAME =
   process.env.WMS_ORDERS_PROCEDURE ?? "wms_ZemiNarackiZaOdobruvanje";
 const WMS_DOCUMENT_FLAG = process.env.WMS_DOCUMENT_FLAG ?? "D";
@@ -174,7 +176,13 @@ const IMPORTER_FIELDS = [
 
 const CUSTOMER_CODE_FIELDS = ["CustomerCode", "Customer", "Sifra_Kup"];
 
-const ARTICLE_FIELDS = ["Article", "Artikulli", "ArticleCode", "ItemCode", "Sku"];
+const ARTICLE_FIELDS = [
+  "Article",
+  "Artikulli",
+  "ArticleCode",
+  "ItemCode",
+  "Sku",
+];
 
 const ARTICLE_DESCRIPTION_FIELDS = [
   "ArticleDescription",
@@ -345,7 +353,8 @@ const normalizeRecord = (record = {}) => {
     importer,
     article: pickString(record, ARTICLE_FIELDS, 255),
     articleDescription: pickString(record, ARTICLE_DESCRIPTION_FIELDS, 500),
-    articleCount: inlineMetrics.articleCount ?? pickNumber(record, ["ArticleCount"]),
+    articleCount:
+      inlineMetrics.articleCount ?? pickNumber(record, ["ArticleCount"]),
     boxCount: inlineMetrics.boxCount ?? pickNumber(record, BOX_FIELDS),
     palletCount: inlineMetrics.palletCount ?? pickNumber(record, PALLET_FIELDS),
     orderDate: pickDate(record, ORDER_DATE_FIELDS),
@@ -449,9 +458,17 @@ const upsertOrders = async (orders) => {
         sql.NVarChar(500),
         order.articleDescription
       );
-      request.input("ArticleCount", sql.Decimal(18, 6), order.articleCount ?? null);
+      request.input(
+        "ArticleCount",
+        sql.Decimal(18, 6),
+        order.articleCount ?? null
+      );
       request.input("BoxCount", sql.Decimal(18, 6), order.boxCount ?? null);
-      request.input("PalletCount", sql.Decimal(18, 6), order.palletCount ?? null);
+      request.input(
+        "PalletCount",
+        sql.Decimal(18, 6),
+        order.palletCount ?? null
+      );
       request.input("OrderDate", sql.DateTime, order.orderDate ?? null);
       request.input("ExpectedDate", sql.DateTime, order.expectedDate ?? null);
       request.input("ArrivalDate", sql.DateTime, order.arrivalDate ?? null);
@@ -459,9 +476,21 @@ const upsertOrders = async (orders) => {
       request.input("OrderStatus", sql.NVarChar(10), order.orderStatus);
       request.input("Description", sql.NVarChar(1000), order.description);
       request.input("Comment", sql.NVarChar(1000), order.comment);
-      request.input("SourceReference", sql.NVarChar(255), order.sourceReference);
-      request.input("SourceUpdatedAt", sql.DateTime, order.sourceUpdatedAt ?? null);
-      request.input("ScheduledStart", sql.DateTime, order.scheduledStart ?? null);
+      request.input(
+        "SourceReference",
+        sql.NVarChar(255),
+        order.sourceReference
+      );
+      request.input(
+        "SourceUpdatedAt",
+        sql.DateTime,
+        order.sourceUpdatedAt ?? null
+      );
+      request.input(
+        "ScheduledStart",
+        sql.DateTime,
+        order.scheduledStart ?? null
+      );
       request.input(
         "OriginalOrderNumber",
         sql.NVarChar(100),
@@ -574,7 +603,10 @@ const syncOnce = async () => {
     await upsertOrders(orders);
     console.log(`[WMS SYNC] Synced ${orders.length} WMS orders.`);
   } catch (error) {
-    console.error("[WMS SYNC] Failed to synchronize WMS orders:", error.message);
+    console.error(
+      "[WMS SYNC] Failed to synchronize WMS orders:",
+      error.message
+    );
   }
 };
 
