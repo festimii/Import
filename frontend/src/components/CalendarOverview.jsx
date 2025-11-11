@@ -246,6 +246,60 @@ const CalendarOverview = ({
     return dayNode;
   };
 
+  const renderDetailRows = (details, options = {}) => {
+    const { commentLabel = "Note" } = options;
+    const detailItems = Array.isArray(details)
+      ? details.filter(Boolean)
+      : [];
+    const hasComment = Boolean(options.comment);
+
+    if (detailItems.length === 0 && !hasComment) {
+      return null;
+    }
+
+    const midpoint = Math.ceil(detailItems.length / 2);
+    const rows = [
+      detailItems.slice(0, midpoint),
+      detailItems.slice(midpoint),
+    ].filter((row) => row.length > 0);
+
+    return (
+      <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+        {rows.map((row, rowIndex) => (
+          <Stack
+            key={rowIndex}
+            direction="row"
+            spacing={1.5}
+            useFlexGap
+            flexWrap="wrap"
+          >
+            {row.map((detail) => (
+              <Typography
+                key={detail}
+                component="span"
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontWeight: 500 }}
+              >
+                {detail}
+              </Typography>
+            ))}
+          </Stack>
+        ))}
+        {hasComment && (
+          <Typography
+            component="span"
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: "block", mt: 0.5, whiteSpace: "pre-wrap" }}
+          >
+            {commentLabel}: {options.comment}
+          </Typography>
+        )}
+      </Stack>
+    );
+  };
+
   return (
     <Paper
       elevation={12}
@@ -345,6 +399,14 @@ const CalendarOverview = ({
                             }}
                           >
                             <ListItemText
+                              primaryTypographyProps={{
+                                variant: "body2",
+                                fontWeight: 600,
+                                color: "text.primary",
+                              }}
+                              secondaryTypographyProps={{
+                                component: "div",
+                              }}
                               primary={`${
                                 order.Importer ?? "Unknown importer"
                               } · ${
@@ -390,21 +452,12 @@ const CalendarOverview = ({
                                   sourceUpdated
                                     ? `Source updated: ${sourceUpdated}`
                                     : null,
-                                ].filter(Boolean);
+                                ];
 
-                                if (!order.Comment) {
-                                  return details.join(" • ");
-                                }
-
-                                return (
-                                  <span>
-                                    {details.join(" • ")}
-                                    <br />
-                                    <span
-                                      style={{ whiteSpace: "pre-wrap" }}
-                                    ></span>
-                                  </span>
-                                );
+                                return renderDetailRows(details, {
+                                  comment: order.Comment,
+                                  commentLabel: "Comment",
+                                });
                               })()}
                             />
                           </ListItem>
@@ -441,6 +494,14 @@ const CalendarOverview = ({
                             }}
                           >
                             <ListItemText
+                              primaryTypographyProps={{
+                                variant: "body2",
+                                fontWeight: 600,
+                                color: "text.primary",
+                              }}
+                              secondaryTypographyProps={{
+                                component: "div",
+                              }}
                               primary={`${
                                 request.Importer
                               } · ${formatArticleCode(request.Article)}`}
@@ -491,21 +552,12 @@ const CalendarOverview = ({
                                   `Confirmed by ${
                                     request.ConfirmedBy ?? "Unknown"
                                   }`,
-                                ].join(" • ");
+                                ];
 
-                                if (!request.Comment) {
-                                  return details;
-                                }
-
-                                return (
-                                  <span>
-                                    {details}
-                                    <br />
-                                    <span style={{ whiteSpace: "pre-wrap" }}>
-                                      Note: {request.Comment}
-                                    </span>
-                                  </span>
-                                );
+                                return renderDetailRows(details, {
+                                  comment: request.Comment,
+                                  commentLabel: "Note",
+                                });
                               })()}
                             />
                           </ListItem>
