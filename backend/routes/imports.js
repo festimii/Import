@@ -1,5 +1,8 @@
 import express from "express";
 import sql from "mssql";
+import { randomUUID } from "crypto";
+import multer from "multer";
+import * as XLSX from "xlsx";
 import { poolPromise } from "../db.js";
 import { secondaryPoolPromise } from "../db_WMS.js"; // secondary DB (pallet calculations)
 import { verifyRole } from "../middleware/auth.js";
@@ -7,8 +10,24 @@ import { dispatchNotificationEvent } from "../services/notifications.js";
 import { ensureWmsOrdersSchema } from "../services/wmsOrdersSync.js";
 
 const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB per file
+    files: 12,
+  },
+});
 
 // ---------- CREATE REQUEST (Requester) ----------
+const trimString = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const trimmed = String(value).trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const normalizeArticleCode = (value) => {
   if (value === null || value === undefined) {
     return value;
@@ -202,6 +221,870 @@ const mapWmsOrders = (records) =>
     return mapped;
   });
 
+let importRequestFeatureState = {
+  checked: false,
+  hasBatchId: false,
+  hasExcelDetails: false,
+};
+
+function markImportRequestFeatureStateDirty() {
+  importRequestFeatureState.checked = false;
+}
+
+const qualifyTableName = (tableName) =>
+  tableName && tableName.includes(".") ? tableName : `dbo.${tableName}`;
+
+const parseQualifiedTable = (tableName) => {
+  const qualified = qualifyTableName(tableName);
+  const [schema, name] = qualified.split(".");
+  return { schema, name, qualified };
+};
+
+const tableExists = async (pool, tableName) => {
+  const { schema, name } = parseQualifiedTable(tableName);
+  const result = await pool
+    .request()
+    .input("TableSchema", sql.NVarChar, schema)
+    .input("TableName", sql.NVarChar, name)
+    .query(`
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = @TableSchema
+          AND TABLE_NAME = @TableName
+      ) THEN 1 ELSE 0 END AS Result;
+    `);
+  return result.recordset?.[0]?.Result === 1;
+};
+
+const columnExists = async (pool, tableName, columnName) => {
+  const { schema, name } = parseQualifiedTable(tableName);
+  const result = await pool
+    .request()
+    .input("TableSchema", sql.NVarChar, schema)
+    .input("TableName", sql.NVarChar, name)
+    .input("ColumnName", sql.NVarChar, columnName)
+    .query(`
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = @TableSchema
+          AND TABLE_NAME = @TableName
+          AND COLUMN_NAME = @ColumnName
+      ) THEN 1 ELSE 0 END AS Result;
+    `);
+  return result.recordset?.[0]?.Result === 1;
+};
+
+const defaultConstraintExists = async (pool, constraintName) => {
+  const result = await pool
+    .request()
+    .input("ConstraintName", sql.NVarChar, constraintName)
+    .query(`
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM sys.default_constraints
+        WHERE Name = @ConstraintName
+      ) THEN 1 ELSE 0 END AS Result;
+    `);
+  return result.recordset?.[0]?.Result === 1;
+};
+
+const indexExists = async (pool, tableName, indexName) => {
+  const { qualified } = parseQualifiedTable(tableName);
+  const result = await pool
+    .request()
+    .input("TableName", sql.NVarChar, qualified)
+    .input("IndexName", sql.NVarChar, indexName)
+    .query(`
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE Name = @IndexName
+          AND Object_ID = OBJECT_ID(@TableName)
+      ) THEN 1 ELSE 0 END AS Result;
+    `);
+  return result.recordset?.[0]?.Result === 1;
+};
+
+const normalizeExcelHeaderName = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/\s+/g, " ");
+
+const EXCEL_FIELD_MAP = new Map([
+  ["shfurnitori", "supplierCode"],
+  ["sh furnitori", "supplierCode"],
+  ["furnitori", "supplierName"],
+  ["adresa (shteti, qyteti, rruga)", "supplierAddress"],
+  ["adresa(shteti, qyteti, rruga)", "supplierAddress"],
+  ["nrkontaktues", "supplierContact"],
+  ["nr kontaktues", "supplierContact"],
+  ["email", "supplierEmail"],
+  ["shifrapartikullit", "article"],
+  ["shifra artikullit", "article"],
+  ["barkodi", "barcode"],
+  ["emriartikullit", "articleName"],
+  ["emri artikullit", "articleName"],
+  ["njesiamatese", "unitOfMeasure"],
+  ["njesia matese", "unitOfMeasure"],
+  ["cope/pako", "piecesPerPack"],
+  ["copepako", "piecesPerPack"],
+  ["cope / pako", "piecesPerPack"],
+  ["pako/paleta", "packsPerPallet"],
+  ["pakopaleta", "packsPerPallet"],
+  ["pako / paleta", "packsPerPallet"],
+  ["sasia-pako", "boxCount"],
+  ["sasiapako", "boxCount"],
+  ["sasia - pako", "boxCount"],
+  ["sasia-palete", "palletCount"],
+  ["sasiapalete", "palletCount"],
+  ["sasia - palete", "palletCount"],
+  ["dataeplanifikuarearitjes", "plannedArrival"],
+  ["forma transportit", "transportMode"],
+  ["formatransportit", "transportMode"],
+  ["kthimi paletave", "palletReturn"],
+  ["kthimipaletave", "palletReturn"],
+  ["afati pageses (dite)", "paymentTermsDays"],
+  ["afatipageses(dite)", "paymentTermsDays"],
+  ["lead time (dite)", "leadTimeDays"],
+  ["leadtime(dite)", "leadTimeDays"],
+]);
+
+const parseExcelNumber = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const normalized = String(value).trim().replace(/\s+/g, "").replace(",", ".");
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseExcelDateValue = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+    }
+  }
+
+  const stringValue = trimString(value);
+  if (!stringValue) {
+    return null;
+  }
+
+  const sanitized = stringValue.replace(/\./g, "-").replace(/\s+/g, " ");
+  const parsedDate = new Date(sanitized);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return parsedDate;
+  }
+
+  return null;
+};
+
+const toSqlDate = (value) => {
+  if (!(value instanceof Date)) {
+    return null;
+  }
+  return value.toISOString().split("T")[0];
+};
+
+const sanitizeExcelString = (value, maxLength = 255) => {
+  const trimmed = trimString(value);
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+  return trimmed.slice(0, maxLength);
+};
+
+const buildExcelItem = ({ row, sourceFileName, sheetName }) => {
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+
+  const mapped = {};
+  for (const [header, value] of Object.entries(row)) {
+    const normalizedHeader = normalizeExcelHeaderName(header);
+    const targetKey = EXCEL_FIELD_MAP.get(normalizedHeader);
+    if (!targetKey) {
+      continue;
+    }
+    mapped[targetKey] = value;
+  }
+
+  const articleValue = sanitizeExcelString(mapped.article, 255);
+  const boxCountValue = parseExcelNumber(mapped.boxCount);
+
+  if (!articleValue || !Number.isFinite(boxCountValue) || boxCountValue <= 0) {
+    return null;
+  }
+
+  const palletCountOverride = parseExcelNumber(mapped.palletCount);
+  const plannedArrival = parseExcelDateValue(mapped.plannedArrival);
+  const paymentTerms = parseExcelNumber(mapped.paymentTermsDays);
+  const leadTime = parseExcelNumber(mapped.leadTimeDays);
+
+  const excelMeta = {
+    supplierCode: sanitizeExcelString(mapped.supplierCode, 100),
+    supplierName: sanitizeExcelString(mapped.supplierName, 255),
+    supplierAddress: sanitizeExcelString(mapped.supplierAddress, 500),
+    supplierContact: sanitizeExcelString(mapped.supplierContact, 100),
+    supplierEmail: sanitizeExcelString(mapped.supplierEmail, 255),
+    barcode: sanitizeExcelString(mapped.barcode, 100),
+    articleName: sanitizeExcelString(mapped.articleName, 255),
+    unitOfMeasure: sanitizeExcelString(mapped.unitOfMeasure, 100),
+    piecesPerPack: parseExcelNumber(mapped.piecesPerPack),
+    packsPerPallet: parseExcelNumber(mapped.packsPerPallet),
+    palletQuantity: parseExcelNumber(mapped.palletCount),
+    transportMode: sanitizeExcelString(mapped.transportMode, 255),
+    palletReturn: sanitizeExcelString(mapped.palletReturn, 255),
+    paymentTermsDays:
+      Number.isFinite(paymentTerms) && paymentTerms >= 0
+        ? Math.round(paymentTerms)
+        : null,
+    leadTimeDays:
+      Number.isFinite(leadTime) && leadTime >= 0 ? Math.round(leadTime) : null,
+    plannedArrivalDate: plannedArrival,
+    sourceFileName: sanitizeExcelString(sourceFileName, 255),
+    sourceSheetName: sanitizeExcelString(sheetName, 255),
+  };
+
+  return {
+    article: normalizeArticleCode(articleValue),
+    boxCount: boxCountValue,
+    palletCountOverride:
+      Number.isFinite(palletCountOverride) && palletCountOverride >= 0
+        ? palletCountOverride
+        : null,
+    excelMeta,
+    importerCandidate: excelMeta.supplierName ?? excelMeta.supplierCode ?? null,
+    plannedArrival,
+  };
+};
+
+let ensureEnhancementsPromise = null;
+const ensureImportRequestEnhancements = () => {
+  if (!ensureEnhancementsPromise) {
+    const runner = (async () => {
+      const pool = await poolPromise;
+      const importTable = "dbo.ImportRequests";
+      const detailsTable = "dbo.ImportRequestExcelDetails";
+      const batchColumn = "BatchId";
+      const batchConstraint = "DF_ImportRequests_BatchId";
+
+      const ensureBatchColumn = async () => {
+        const hasBatchColumn = await columnExists(
+          pool,
+          importTable,
+          batchColumn
+        );
+        if (!hasBatchColumn) {
+          await pool
+            .request()
+            .query(
+              `ALTER TABLE ${importTable} ADD ${batchColumn} UNIQUEIDENTIFIER NULL;`
+            );
+        }
+
+        const hasConstraint = await defaultConstraintExists(
+          pool,
+          batchConstraint
+        );
+        if (!hasConstraint) {
+          await pool
+            .request()
+            .query(
+              `ALTER TABLE ${importTable} ADD CONSTRAINT ${batchConstraint} DEFAULT (NEWID()) FOR ${batchColumn};`
+            );
+        }
+
+        if (await columnExists(pool, importTable, batchColumn)) {
+          await pool.request().query(`
+            UPDATE ${importTable}
+            SET ${batchColumn} = COALESCE(${batchColumn}, NEWID())
+            WHERE ${batchColumn} IS NULL;
+          `);
+        }
+      };
+
+      const ensureDetailsTable = async () => {
+        const detailColumnDefinitions = [
+          ["SupplierCode", "NVARCHAR(100) NULL"],
+          ["SupplierName", "NVARCHAR(255) NULL"],
+          ["SupplierAddress", "NVARCHAR(500) NULL"],
+          ["SupplierContact", "NVARCHAR(100) NULL"],
+          ["SupplierEmail", "NVARCHAR(255) NULL"],
+          ["Barcode", "NVARCHAR(100) NULL"],
+          ["ArticleName", "NVARCHAR(255) NULL"],
+          ["UnitOfMeasure", "NVARCHAR(100) NULL"],
+          ["PiecesPerPack", "DECIMAL(18, 6) NULL"],
+          ["PacksPerPallet", "DECIMAL(18, 6) NULL"],
+          ["PalletQuantity", "DECIMAL(18, 6) NULL"],
+          ["TransportMode", "NVARCHAR(255) NULL"],
+          ["PalletReturn", "NVARCHAR(255) NULL"],
+          ["PaymentTermsDays", "INT NULL"],
+          ["LeadTimeDays", "INT NULL"],
+          ["PlannedArrivalDate", "DATE NULL"],
+          ["SourceFileName", "NVARCHAR(255) NULL"],
+          ["SourceSheetName", "NVARCHAR(255) NULL"],
+          ["CreatedAt", "DATETIME NOT NULL DEFAULT (GETDATE()) WITH VALUES"],
+        ];
+
+        const ensureDetailsColumn = async (column, definition) => {
+          const exists = await columnExists(pool, detailsTable, column);
+          if (!exists) {
+            await pool
+              .request()
+              .query(
+                `ALTER TABLE ${detailsTable} ADD ${column} ${definition};`
+              );
+          }
+        };
+
+        const hasDetailsTable = await tableExists(pool, detailsTable);
+        if (!hasDetailsTable) {
+          await pool.request().query(`
+            CREATE TABLE ${detailsTable} (
+              ID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+              RequestID INT NOT NULL UNIQUE,
+              ${batchColumn} UNIQUEIDENTIFIER NOT NULL,
+              SupplierCode NVARCHAR(100) NULL,
+              SupplierName NVARCHAR(255) NULL,
+              SupplierAddress NVARCHAR(500) NULL,
+              SupplierContact NVARCHAR(100) NULL,
+              SupplierEmail NVARCHAR(255) NULL,
+              Barcode NVARCHAR(100) NULL,
+              ArticleName NVARCHAR(255) NULL,
+              UnitOfMeasure NVARCHAR(100) NULL,
+              PiecesPerPack DECIMAL(18, 6) NULL,
+              PacksPerPallet DECIMAL(18, 6) NULL,
+              PalletQuantity DECIMAL(18, 6) NULL,
+              TransportMode NVARCHAR(255) NULL,
+              PalletReturn NVARCHAR(255) NULL,
+              PaymentTermsDays INT NULL,
+              LeadTimeDays INT NULL,
+              PlannedArrivalDate DATE NULL,
+              SourceFileName NVARCHAR(255) NULL,
+              SourceSheetName NVARCHAR(255) NULL,
+              CreatedAt DATETIME NOT NULL DEFAULT (GETDATE()),
+              CONSTRAINT FK_ImportRequestExcelDetails_Request FOREIGN KEY (RequestID)
+                REFERENCES dbo.ImportRequests(ID)
+                ON DELETE CASCADE
+            );
+
+            CREATE UNIQUE INDEX UX_ImportRequestExcelDetails_Request
+              ON ${detailsTable} (RequestID);
+            CREATE INDEX IX_ImportRequestExcelDetails_BatchId
+              ON ${detailsTable} (${batchColumn});
+          `);
+          return;
+        }
+
+        await ensureDetailsColumn(batchColumn, "UNIQUEIDENTIFIER NULL");
+        if (await columnExists(pool, detailsTable, batchColumn)) {
+          await pool.request().query(`
+            UPDATE ${detailsTable}
+            SET ${batchColumn} = COALESCE(${batchColumn}, NEWID())
+            WHERE ${batchColumn} IS NULL;
+          `);
+          await pool
+            .request()
+            .query(
+              `ALTER TABLE ${detailsTable} ALTER COLUMN ${batchColumn} UNIQUEIDENTIFIER NOT NULL;`
+            );
+        }
+
+        for (const [column, definition] of detailColumnDefinitions) {
+          await ensureDetailsColumn(column, definition);
+        }
+
+        if (
+          !(await indexExists(
+            pool,
+            detailsTable,
+            "UX_ImportRequestExcelDetails_Request"
+          ))
+        ) {
+          await pool.request().query(`
+            CREATE UNIQUE INDEX UX_ImportRequestExcelDetails_Request
+              ON ${detailsTable} (RequestID);
+          `);
+        }
+
+        if (
+          !(await indexExists(
+            pool,
+            detailsTable,
+            "IX_ImportRequestExcelDetails_BatchId"
+          ))
+        ) {
+          await pool.request().query(`
+            CREATE INDEX IX_ImportRequestExcelDetails_BatchId
+              ON ${detailsTable} (${batchColumn});
+          `);
+        }
+      };
+
+      await ensureBatchColumn();
+      await ensureDetailsTable();
+    })();
+
+    ensureEnhancementsPromise = runner
+      .then((result) => {
+        markImportRequestFeatureStateDirty();
+        return result;
+      })
+      .catch((error) => {
+        markImportRequestFeatureStateDirty();
+        ensureEnhancementsPromise = null;
+        throw error;
+      });
+  }
+
+  return ensureEnhancementsPromise;
+};
+
+const getImportRequestFeatureState = async () => {
+  if (!importRequestFeatureState.checked) {
+    try {
+      await ensureImportRequestEnhancements();
+    } catch (ensureError) {
+      console.error(
+        "Import request schema ensure failed:",
+        ensureError?.message || ensureError
+      );
+    }
+
+    try {
+      const pool = await poolPromise;
+      const detection = await pool.request().query(`
+        SELECT
+          CASE WHEN COL_LENGTH('dbo.ImportRequests', 'BatchId') IS NULL THEN 0 ELSE 1 END AS HasBatchId,
+          CASE WHEN OBJECT_ID('dbo.ImportRequestExcelDetails', 'U') IS NULL THEN 0 ELSE 1 END AS HasExcelDetails
+      `);
+      const row = detection.recordset?.[0] ?? {};
+      importRequestFeatureState = {
+        checked: true,
+        hasBatchId: row.HasBatchId === 1,
+        hasExcelDetails: row.HasExcelDetails === 1,
+      };
+    } catch (stateError) {
+      console.error(
+        "Import request feature detection failed:",
+        stateError?.message || stateError
+      );
+      importRequestFeatureState = {
+        checked: true,
+        hasBatchId: false,
+        hasExcelDetails: false,
+      };
+    }
+  }
+
+  return importRequestFeatureState;
+};
+
+const insertExcelDetails = async (transaction, { requestId, batchId, meta }) => {
+  if (!meta) {
+    return;
+  }
+
+  const plannedArrivalSql = meta.plannedArrivalDate
+    ? toSqlDate(meta.plannedArrivalDate)
+    : null;
+
+  const extrasRequest = new sql.Request(transaction)
+    .input("RequestID", requestId)
+    .input("BatchId", batchId)
+    .input("SupplierCode", meta.supplierCode ?? null)
+    .input("SupplierName", meta.supplierName ?? null)
+    .input("SupplierAddress", meta.supplierAddress ?? null)
+    .input("SupplierContact", meta.supplierContact ?? null)
+    .input("SupplierEmail", meta.supplierEmail ?? null)
+    .input("Barcode", meta.barcode ?? null)
+    .input("ArticleName", meta.articleName ?? null)
+    .input("UnitOfMeasure", meta.unitOfMeasure ?? null)
+    .input("PiecesPerPack", meta.piecesPerPack ?? null)
+    .input("PacksPerPallet", meta.packsPerPallet ?? null)
+    .input("PalletQuantity", meta.palletQuantity ?? null)
+    .input("TransportMode", meta.transportMode ?? null)
+    .input("PalletReturn", meta.palletReturn ?? null)
+    .input("PaymentTermsDays", meta.paymentTermsDays ?? null)
+    .input("LeadTimeDays", meta.leadTimeDays ?? null)
+    .input("PlannedArrivalDate", plannedArrivalSql)
+    .input("SourceFileName", meta.sourceFileName ?? null)
+    .input("SourceSheetName", meta.sourceSheetName ?? null);
+
+  await extrasRequest.query(`MERGE dbo.ImportRequestExcelDetails AS Target
+      USING (SELECT @RequestID AS RequestID) AS Source
+      ON Target.RequestID = Source.RequestID
+      WHEN MATCHED THEN
+        UPDATE SET
+          BatchId = @BatchId,
+          SupplierCode = @SupplierCode,
+          SupplierName = @SupplierName,
+          SupplierAddress = @SupplierAddress,
+          SupplierContact = @SupplierContact,
+          SupplierEmail = @SupplierEmail,
+          Barcode = @Barcode,
+          ArticleName = @ArticleName,
+          UnitOfMeasure = @UnitOfMeasure,
+          PiecesPerPack = @PiecesPerPack,
+          PacksPerPallet = @PacksPerPallet,
+          PalletQuantity = @PalletQuantity,
+          TransportMode = @TransportMode,
+          PalletReturn = @PalletReturn,
+          PaymentTermsDays = @PaymentTermsDays,
+          LeadTimeDays = @LeadTimeDays,
+          PlannedArrivalDate = @PlannedArrivalDate,
+          SourceFileName = @SourceFileName,
+          SourceSheetName = @SourceSheetName
+      WHEN NOT MATCHED THEN
+        INSERT (
+          RequestID,
+          BatchId,
+          SupplierCode,
+          SupplierName,
+          SupplierAddress,
+          SupplierContact,
+          SupplierEmail,
+          Barcode,
+          ArticleName,
+          UnitOfMeasure,
+          PiecesPerPack,
+          PacksPerPallet,
+          PalletQuantity,
+          TransportMode,
+          PalletReturn,
+          PaymentTermsDays,
+          LeadTimeDays,
+          PlannedArrivalDate,
+          SourceFileName,
+          SourceSheetName
+        )
+        VALUES (
+          @RequestID,
+          @BatchId,
+          @SupplierCode,
+          @SupplierName,
+          @SupplierAddress,
+          @SupplierContact,
+          @SupplierEmail,
+          @Barcode,
+          @ArticleName,
+          @UnitOfMeasure,
+          @PiecesPerPack,
+          @PacksPerPallet,
+          @PalletQuantity,
+          @TransportMode,
+          @PalletReturn,
+          @PaymentTermsDays,
+          @LeadTimeDays,
+          @PlannedArrivalDate,
+          @SourceFileName,
+          @SourceSheetName
+        );`);
+};
+
+const insertImportRequestItems = async ({
+  importer,
+  requestDateSqlValue,
+  arrivalDateSqlValue,
+  normalizedItems,
+  requesterUsername,
+  batchId,
+  defaultComment,
+}) => {
+  if (!Array.isArray(normalizedItems) || normalizedItems.length === 0) {
+    throw new Error("At least one article is required for the import order.");
+  }
+
+  const featureState = await getImportRequestFeatureState();
+  const includeBatchId = featureState.hasBatchId;
+  const includeExcelDetails = featureState.hasBatchId && featureState.hasExcelDetails;
+  const effectiveBatchId = includeBatchId ? batchId : null;
+
+  const pool = await poolPromise;
+  const secondaryPool = await secondaryPoolPromise;
+  const transaction = new sql.Transaction(pool);
+  const insertedRecords = [];
+
+  await transaction.begin();
+
+  try {
+    for (let index = 0; index < normalizedItems.length; index += 1) {
+      const current = normalizedItems[index];
+
+      let calculation = current.calculation ?? null;
+      if (!calculation) {
+        try {
+          calculation = await calculatePalletization(secondaryPool, {
+            article: current.article,
+            boxCount: current.boxCount,
+          });
+        } catch (error) {
+          error.meta = {
+            article: current.article,
+            itemIndex: index + 1,
+          };
+          throw error;
+        }
+      }
+
+      const palletCount = (() => {
+        if (
+          Number.isFinite(current.palletCountOverride) &&
+          current.palletCountOverride >= 0
+        ) {
+          return Math.max(0, Math.round(current.palletCountOverride));
+        }
+        if (Number.isFinite(calculation.totalPalletPositions)) {
+          return Math.max(0, Math.round(calculation.totalPalletPositions));
+        }
+        return 0;
+      })();
+
+      const request = new sql.Request(transaction)
+        .input("DataKerkeses", requestDateSqlValue)
+        .input("DataArritjes", arrivalDateSqlValue)
+        .input("Importuesi", importer)
+        .input("Artikulli", current.article)
+        .input("NumriPakove", current.boxCount)
+        .input("NumriPaletave", palletCount)
+        .input("BoxesPerPallet", calculation.boxesPerPallet ?? null)
+        .input("BoxesPerLayer", calculation.boxesPerLayer ?? null)
+        .input("LayersPerPallet", calculation.layersPerPallet ?? null)
+        .input("FullPallets", calculation.fullPallets ?? null)
+        .input("RemainingBoxes", calculation.remainingBoxes ?? null)
+        .input("PalletWeightKg", calculation.palletWeightKg ?? null)
+        .input("PalletVolumeM3", calculation.palletVolumeM3 ?? null)
+        .input("BoxWeightKg", calculation.boxWeightKg ?? null)
+        .input("BoxVolumeM3", calculation.boxVolumeM3 ?? null)
+        .input(
+          "PalletVolumeUtilization",
+          calculation.palletVolumeUtilization ?? null
+        )
+        .input(
+          "WeightFullPalletsKg",
+          calculation.weightFullPalletsKg ?? null
+        )
+        .input(
+          "VolumeFullPalletsM3",
+          calculation.volumeFullPalletsM3 ?? null
+        )
+        .input("WeightRemainingKg", calculation.weightRemainingKg ?? null)
+        .input("VolumeRemainingM3", calculation.volumeRemainingM3 ?? null)
+        .input(
+          "TotalShipmentWeightKg",
+          calculation.totalShipmentWeightKg ?? null
+        )
+        .input(
+          "TotalShipmentVolumeM3",
+          calculation.totalShipmentVolumeM3 ?? null
+        )
+        .input("Comment", current.comment ?? defaultComment ?? null)
+        .input("Useri", requesterUsername);
+
+      if (includeBatchId) {
+        request.input("BatchId", effectiveBatchId);
+      }
+
+      const result = await request.query(`INSERT INTO ImportRequests (
+              DataKerkeses,
+              DataArritjes,
+              Importuesi,
+              Artikulli,
+              NumriPakove,
+              NumriPaletave,
+              BoxesPerPallet,
+              BoxesPerLayer,
+              LayersPerPallet,
+              FullPallets,
+              RemainingBoxes,
+              PalletWeightKg,
+              PalletVolumeM3,
+              BoxWeightKg,
+              BoxVolumeM3,
+              PalletVolumeUtilization,
+              WeightFullPalletsKg,
+              VolumeFullPalletsM3,
+              WeightRemainingKg,
+              VolumeRemainingM3,
+              TotalShipmentWeightKg,
+              TotalShipmentVolumeM3,
+              Useri,
+              Comment${
+                includeBatchId
+                  ? `,
+              BatchId`
+                  : ""
+              }
+            )
+            OUTPUT INSERTED.ID,
+                   INSERTED.DataKerkeses AS RequestDate,
+                   INSERTED.DataArritjes AS ArrivalDate,
+                   INSERTED.Importuesi AS Importer,
+                   INSERTED.Artikulli AS Article,
+                   INSERTED.NumriPakove AS BoxCount,
+                   INSERTED.NumriPaletave AS PalletCount,
+                   INSERTED.BoxesPerPallet,
+                   INSERTED.BoxesPerLayer,
+                   INSERTED.LayersPerPallet,
+                   INSERTED.FullPallets,
+                   INSERTED.RemainingBoxes,
+                   INSERTED.PalletWeightKg,
+                   INSERTED.PalletVolumeM3,
+                   INSERTED.BoxWeightKg,
+                   INSERTED.BoxVolumeM3,
+                   INSERTED.PalletVolumeUtilization,
+                   INSERTED.WeightFullPalletsKg,
+                   INSERTED.VolumeFullPalletsM3,
+                   INSERTED.WeightRemainingKg,
+                   INSERTED.VolumeRemainingM3,
+                   INSERTED.TotalShipmentWeightKg,
+                   INSERTED.TotalShipmentVolumeM3,
+                   INSERTED.Comment,
+                   INSERTED.Useri AS Requester,
+                   INSERTED.Status,
+                   INSERTED.ConfirmedBy,
+                   INSERTED.CreatedAt${
+                     includeBatchId
+                       ? `,
+                   INSERTED.BatchId`
+                       : ""
+                   }
+            VALUES (
+              @DataKerkeses,
+              @DataArritjes,
+              @Importuesi,
+              @Artikulli,
+              @NumriPakove,
+              @NumriPaletave,
+              @BoxesPerPallet,
+              @BoxesPerLayer,
+              @LayersPerPallet,
+              @FullPallets,
+              @RemainingBoxes,
+              @PalletWeightKg,
+              @PalletVolumeM3,
+              @BoxWeightKg,
+              @BoxVolumeM3,
+              @PalletVolumeUtilization,
+              @WeightFullPalletsKg,
+              @VolumeFullPalletsM3,
+              @WeightRemainingKg,
+              @VolumeRemainingM3,
+              @TotalShipmentWeightKg,
+              @TotalShipmentVolumeM3,
+              @Useri,
+              @Comment${
+                includeBatchId
+                  ? `,
+              @BatchId`
+                  : ""
+              }
+            )`);
+
+      const [record] = mapArticles(result.recordset);
+      insertedRecords.push(record);
+
+      if (includeExcelDetails && current.excelMeta) {
+        await insertExcelDetails(transaction, {
+          requestId: record.ID,
+          batchId: effectiveBatchId,
+          meta: current.excelMeta,
+        });
+      }
+    }
+
+    await transaction.commit();
+    return insertedRecords;
+  } catch (transactionError) {
+    try {
+      await transaction.rollback();
+    } catch (rollbackError) {
+      console.error("Rollback error:", rollbackError.message);
+    }
+
+    throw transactionError;
+  }
+};
+
+const notifyRequestCreation = async ({
+  pool,
+  records,
+  initiatorUsername,
+}) => {
+  if (!records || records.length === 0) {
+    return;
+  }
+
+  const newRequestRoles = ["admin", "confirmer"];
+
+  for (const record of records) {
+    const arrivalLabel = formatNotificationDate(record.ArrivalDate);
+    const importerLabel = record.Importer || "Unknown importer";
+    const articleLabel = record.Article || "N/A";
+    const message = `${initiatorUsername} submitted request #${record.ID} (${articleLabel}) for ${importerLabel} with arrival ${arrivalLabel}.`;
+
+    try {
+      await dispatchNotificationEvent(pool, {
+        requestId: record.ID,
+        message,
+        type: "request_created",
+        roles: newRequestRoles,
+        excludeUsername: initiatorUsername,
+        push: {
+          title: "New import request",
+          body: message,
+          data: { intent: "request_created" },
+          tag: "request-" + record.ID + "-created",
+        },
+      });
+    } catch (notificationError) {
+      console.error(
+        "Request creation notification error:",
+        notificationError.message
+      );
+    }
+  }
+};
+
+ensureImportRequestEnhancements().catch((error) => {
+  console.error(
+    "Failed to ensure ImportRequests schema:",
+    error?.message || error
+  );
+});
+
 router.post("/", verifyRole(["requester"]), async (req, res) => {
   const {
     requestDate,
@@ -306,200 +1189,28 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
 
     const requestDateSqlValue = requestDateValue.toISOString().split("T")[0];
     const arrivalDateSqlValue = arrivalDateValue.toISOString().split("T")[0];
+    const batchId = randomUUID();
 
-    const pool = await poolPromise;
-    const secondaryPool = await secondaryPoolPromise;
-    const transaction = new sql.Transaction(pool);
-
-    await transaction.begin();
-
-    const insertedRecords = [];
-
-    try {
-      for (let index = 0; index < normalizedItems.length; index += 1) {
-        const current = normalizedItems[index];
-
-        let calculation;
-        try {
-          calculation = await calculatePalletization(secondaryPool, {
-            article: current.article,
-            boxCount: current.boxCount,
-          });
-        } catch (error) {
-          error.meta = {
-            article: current.article,
-            itemIndex: index + 1,
-          };
-          throw error;
-        }
-
-        const palletCount = Number.isFinite(calculation.totalPalletPositions)
-          ? Math.max(0, Math.round(calculation.totalPalletPositions))
-          : 0;
-
-        const request = new sql.Request(transaction)
-          .input("DataKerkeses", requestDateSqlValue)
-          .input("DataArritjes", arrivalDateSqlValue)
-          .input("Importuesi", importer)
-          .input("Artikulli", current.article)
-          .input("NumriPakove", current.boxCount)
-          .input("NumriPaletave", palletCount)
-          .input("BoxesPerPallet", calculation.boxesPerPallet ?? null)
-          .input("BoxesPerLayer", calculation.boxesPerLayer ?? null)
-          .input("LayersPerPallet", calculation.layersPerPallet ?? null)
-          .input("FullPallets", calculation.fullPallets ?? null)
-          .input("RemainingBoxes", calculation.remainingBoxes ?? null)
-          .input("PalletWeightKg", calculation.palletWeightKg ?? null)
-          .input("PalletVolumeM3", calculation.palletVolumeM3 ?? null)
-          .input("BoxWeightKg", calculation.boxWeightKg ?? null)
-          .input("BoxVolumeM3", calculation.boxVolumeM3 ?? null)
-          .input(
-            "PalletVolumeUtilization",
-            calculation.palletVolumeUtilization ?? null
-          )
-          .input("WeightFullPalletsKg", calculation.weightFullPalletsKg ?? null)
-          .input("VolumeFullPalletsM3", calculation.volumeFullPalletsM3 ?? null)
-          .input("WeightRemainingKg", calculation.weightRemainingKg ?? null)
-          .input("VolumeRemainingM3", calculation.volumeRemainingM3 ?? null)
-          .input(
-            "TotalShipmentWeightKg",
-            calculation.totalShipmentWeightKg ?? null
-          )
-          .input(
-            "TotalShipmentVolumeM3",
-            calculation.totalShipmentVolumeM3 ?? null
-          )
-          .input("Comment", current.comment)
-          .input("Useri", req.user.username);
-
-        const result = await request.query(`INSERT INTO ImportRequests (
-                DataKerkeses,
-                DataArritjes,
-                Importuesi,
-                Artikulli,
-                NumriPakove,
-                NumriPaletave,
-                BoxesPerPallet,
-                BoxesPerLayer,
-                LayersPerPallet,
-                FullPallets,
-                RemainingBoxes,
-                PalletWeightKg,
-                PalletVolumeM3,
-                BoxWeightKg,
-                BoxVolumeM3,
-                PalletVolumeUtilization,
-                WeightFullPalletsKg,
-                VolumeFullPalletsM3,
-                WeightRemainingKg,
-                VolumeRemainingM3,
-                TotalShipmentWeightKg,
-                TotalShipmentVolumeM3,
-                Useri,
-                Comment
-              )
-              OUTPUT INSERTED.ID,
-                     INSERTED.DataKerkeses AS RequestDate,
-                     INSERTED.DataArritjes AS ArrivalDate,
-                     INSERTED.Importuesi AS Importer,
-                     INSERTED.Artikulli AS Article,
-                     INSERTED.NumriPakove AS BoxCount,
-                     INSERTED.NumriPaletave AS PalletCount,
-                     INSERTED.BoxesPerPallet,
-                     INSERTED.BoxesPerLayer,
-                     INSERTED.LayersPerPallet,
-                     INSERTED.FullPallets,
-                     INSERTED.RemainingBoxes,
-                     INSERTED.PalletWeightKg,
-                     INSERTED.PalletVolumeM3,
-                     INSERTED.BoxWeightKg,
-                     INSERTED.BoxVolumeM3,
-                     INSERTED.PalletVolumeUtilization,
-                     INSERTED.WeightFullPalletsKg,
-                     INSERTED.VolumeFullPalletsM3,
-                     INSERTED.WeightRemainingKg,
-                     INSERTED.VolumeRemainingM3,
-                     INSERTED.TotalShipmentWeightKg,
-                     INSERTED.TotalShipmentVolumeM3,
-                     INSERTED.Comment,
-                     INSERTED.Useri AS Requester,
-                     INSERTED.Status,
-                     INSERTED.ConfirmedBy,
-                     INSERTED.CreatedAt
-              VALUES (
-                @DataKerkeses,
-                @DataArritjes,
-                @Importuesi,
-                @Artikulli,
-                @NumriPakove,
-                @NumriPaletave,
-                @BoxesPerPallet,
-                @BoxesPerLayer,
-                @LayersPerPallet,
-                @FullPallets,
-                @RemainingBoxes,
-                @PalletWeightKg,
-                @PalletVolumeM3,
-                @BoxWeightKg,
-                @BoxVolumeM3,
-                @PalletVolumeUtilization,
-                @WeightFullPalletsKg,
-                @VolumeFullPalletsM3,
-                @WeightRemainingKg,
-                @VolumeRemainingM3,
-                @TotalShipmentWeightKg,
-                @TotalShipmentVolumeM3,
-                @Useri,
-                @Comment
-              )`);
-        const [record] = mapArticles(result.recordset);
-        insertedRecords.push(record);
-      }
-
-      await transaction.commit();
-    } catch (transactionError) {
-      try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        console.error("Rollback error:", rollbackError.message);
-      }
-
-      throw transactionError;
-    }
+    const insertedRecords = await insertImportRequestItems({
+      importer,
+      requestDateSqlValue,
+      arrivalDateSqlValue,
+      normalizedItems,
+      requesterUsername: req.user.username,
+      batchId,
+      defaultComment: sanitizedDefaultComment,
+    });
 
     const responsePayload =
       insertedRecords.length === 1 ? insertedRecords[0] : insertedRecords;
 
     if (insertedRecords.length > 0) {
-      const newRequestRoles = ["admin", "confirmer"];
-
-      for (const record of insertedRecords) {
-        const arrivalLabel = formatNotificationDate(record.ArrivalDate);
-        const importerLabel = record.Importer || "Unknown importer";
-        const articleLabel = record.Article || "N/A";
-        const message = `${req.user.username} submitted request #${record.ID} (${articleLabel}) for ${importerLabel} with arrival ${arrivalLabel}.`;
-
-        try {
-          await dispatchNotificationEvent(pool, {
-            requestId: record.ID,
-            message,
-            type: "request_created",
-            roles: newRequestRoles,
-            excludeUsername: req.user.username,
-            push: {
-              title: "New import request",
-              body: message,
-              data: { intent: "request_created" },
-              tag: "request-" + record.ID + "-created",
-            },
-          });
-        } catch (notificationError) {
-          console.error(
-            "Request creation notification error:",
-            notificationError.message
-          );
-        }
-      }
+      const pool = await poolPromise;
+      await notifyRequestCreation({
+        pool,
+        records: insertedRecords,
+        initiatorUsername: req.user.username,
+      });
     }
 
     res.json(responsePayload);
@@ -527,9 +1238,191 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+router.post(
+  "/upload",
+  verifyRole(["requester"]),
+  upload.array("files", 12),
+  async (req, res) => {
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Please attach at least one Excel file." });
+    }
+
+    const sanitizedDefaultComment = sanitizeComment(req.body.comment);
+    const excelItems = [];
+    const importerCandidates = new Set();
+    const arrivalCandidates = new Set();
+
+    try {
+      for (const file of files) {
+        let workbook;
+        try {
+          workbook = XLSX.read(file.buffer, {
+            type: "buffer",
+            cellDates: true,
+          });
+        } catch (readError) {
+          return res.status(400).json({
+            message: `Unable to read ${file.originalname}. Please ensure the file is a valid Excel spreadsheet.`,
+          });
+        }
+
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          if (!worksheet) continue;
+
+          const rows = XLSX.utils.sheet_to_json(worksheet, {
+            defval: null,
+            blankrows: false,
+          });
+
+          for (const row of rows) {
+            const parsed = buildExcelItem({
+              row,
+              sourceFileName: file.originalname,
+              sheetName,
+            });
+
+            if (!parsed) {
+              continue;
+            }
+
+            if (parsed.importerCandidate) {
+              importerCandidates.add(parsed.importerCandidate);
+            }
+
+            if (parsed.plannedArrival) {
+              const arrivalSql = toSqlDate(parsed.plannedArrival);
+              if (arrivalSql) {
+                arrivalCandidates.add(arrivalSql);
+              }
+            }
+
+            excelItems.push(parsed);
+          }
+        }
+      }
+
+      if (excelItems.length === 0) {
+        return res.status(400).json({
+          message:
+            "No valid rows were found in the uploaded spreadsheets. Make sure the header matches the expected template.",
+        });
+      }
+
+      const importerFromBody = trimString(req.body.importer);
+      let importerValue = importerFromBody;
+
+      if (!importerValue) {
+        if (importerCandidates.size === 1) {
+          importerValue = [...importerCandidates][0];
+        }
+      }
+
+      if (!importerValue) {
+        return res.status(400).json({
+          message:
+            "Unable to determine the importer. Please fill the importer field or ensure every Excel sheet contains the same Furnitori value.",
+        });
+      }
+
+      const arrivalFromBody = trimString(req.body.arrivalDate);
+      let arrivalDateSqlValue = null;
+
+      if (arrivalFromBody) {
+        const parsed = new Date(arrivalFromBody);
+        if (Number.isNaN(parsed.getTime())) {
+          return res
+            .status(400)
+            .json({ message: "Invalid arrival date provided." });
+        }
+        arrivalDateSqlValue = parsed.toISOString().split("T")[0];
+      } else if (arrivalCandidates.size === 1) {
+        arrivalDateSqlValue = [...arrivalCandidates][0];
+      } else {
+        return res.status(400).json({
+          message:
+            "Unable to determine the arrival date. Please fill the arrival date field or ensure all Excel rows use the same planned arrival date.",
+        });
+      }
+
+      const requestDateValue = (() => {
+        const provided = trimString(req.body.requestDate);
+        if (!provided) return new Date();
+        const parsed = new Date(provided);
+        if (Number.isNaN(parsed.getTime())) {
+          throw new Error("Invalid request date provided.");
+        }
+        return parsed;
+      })();
+
+      const requestDateSqlValue = requestDateValue.toISOString().split("T")[0];
+      const batchId = randomUUID();
+
+      const normalizedItems = excelItems.map((item) => ({
+        article: item.article,
+        boxCount: item.boxCount,
+        palletCountOverride: item.palletCountOverride,
+        comment: sanitizedDefaultComment,
+        excelMeta: item.excelMeta,
+      }));
+
+      const insertedRecords = await insertImportRequestItems({
+        importer: importerValue,
+        requestDateSqlValue,
+        arrivalDateSqlValue,
+        normalizedItems,
+        requesterUsername: req.user.username,
+        batchId,
+        defaultComment: sanitizedDefaultComment,
+      });
+
+      if (insertedRecords.length > 0) {
+        const pool = await poolPromise;
+        await notifyRequestCreation({
+          pool,
+          records: insertedRecords,
+          initiatorUsername: req.user.username,
+        });
+      }
+
+      const { hasBatchId } = await getImportRequestFeatureState();
+      res.json({
+        ...(hasBatchId ? { batchId } : {}),
+        items: insertedRecords,
+        importer: importerValue,
+        arrivalDate: arrivalDateSqlValue,
+        processedRows: excelItems.length,
+      });
+    } catch (error) {
+      console.error("Excel upload error:", error);
+      if (error.message === "Invalid request date provided.") {
+        return res.status(400).json({ message: error.message });
+      }
+      if (
+        error.message === "Pallet calculation unavailable." &&
+        error.meta?.article
+      ) {
+        return res.status(400).json({
+          message: `We couldn't calculate pallet details for article ${error.meta.article}. Please verify the article code and box quantity.`,
+        });
+      }
+      res
+        .status(500)
+        .json({ message: "Failed to create requests from the Excel files." });
+    }
+  }
+);
 // ---------- GET PENDING REQUESTS (Confirmer) ----------
 router.get("/", verifyRole(["confirmer"]), async (req, res) => {
   try {
+    const { hasBatchId } = await getImportRequestFeatureState();
+    const batchProjection = hasBatchId
+      ? ", BatchId"
+      : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
     const pool = await poolPromise;
     const result = await pool.request().query(`SELECT ID,
                      DataKerkeses AS RequestDate,
@@ -558,7 +1451,7 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
                      Useri AS Requester,
                      Status,
                      ConfirmedBy,
-                     CreatedAt
+                     CreatedAt${batchProjection}
               FROM ImportRequests
               WHERE Status = 'pending'
               ORDER BY CreatedAt DESC`);
@@ -575,6 +1468,10 @@ router.get(
   verifyRole(["admin", "confirmer", "requester"]),
   async (req, res) => {
     try {
+      const { hasBatchId } = await getImportRequestFeatureState();
+      const batchProjection = hasBatchId
+        ? ", BatchId"
+        : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
       const pool = await poolPromise;
       const result = await pool.request().query(`SELECT ID,
                      DataKerkeses AS RequestDate,
@@ -603,7 +1500,7 @@ router.get(
                      Useri AS Requester,
                      Status,
                      ConfirmedBy,
-                     CreatedAt
+                     CreatedAt${batchProjection}
               FROM ImportRequests
               WHERE Status = 'approved'
               ORDER BY DataArritjes ASC, CreatedAt DESC`);
@@ -620,6 +1517,10 @@ router.get(
   verifyRole(["admin", "confirmer", "requester"]),
   async (req, res) => {
     try {
+      const { hasBatchId } = await getImportRequestFeatureState();
+      const batchProjection = hasBatchId
+        ? ", BatchId"
+        : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
       await ensureWmsOrdersSchema();
       const pool = await poolPromise;
 
@@ -651,7 +1552,7 @@ router.get(
                          Useri AS Requester,
                          Status,
                          ConfirmedBy,
-                         CreatedAt
+                         CreatedAt${batchProjection}
                   FROM ImportRequests
                   WHERE Status = 'approved'
                   ORDER BY DataArritjes ASC, CreatedAt DESC`),
@@ -1027,6 +1928,8 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
   }
 
   try {
+    const { hasBatchId } = await getImportRequestFeatureState();
+    const batchOutput = hasBatchId ? ", INSERTED.BatchId" : "";
     const pool = await poolPromise;
     const existingResult = await pool
       .request()
@@ -1110,7 +2013,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                    INSERTED.Useri AS Requester,
                    INSERTED.Status,
                    INSERTED.ConfirmedBy,
-                   INSERTED.CreatedAt
+                   INSERTED.CreatedAt${batchOutput}
             WHERE ID = @ID`);
     const [record] = mapArticles(result.recordset);
 

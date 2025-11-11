@@ -1,21 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Chip,
   CircularProgress,
-  Collapse,
   Container,
   Divider,
   Grid,
-  Paper,
   Stack,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
+  TextField,
   Typography,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
@@ -26,13 +25,7 @@ import EventBusyRoundedIcon from "@mui/icons-material/EventBusyRounded";
 import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
-import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
-import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
-import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
-import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
-import AllInboxRoundedIcon from "@mui/icons-material/AllInboxRounded";
-import WarehouseRoundedIcon from "@mui/icons-material/WarehouseRounded";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
@@ -40,7 +33,7 @@ import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 import NotificationCenter from "../components/NotificationCenter";
-import formatArticleCode from "../utils/formatArticle";
+import SectionCard from "../components/SectionCard";
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
@@ -54,10 +47,11 @@ export default function AdminDashboard() {
   const [approvedRequests, setApprovedRequests] = useState([]);
   const [approvedLoading, setApprovedLoading] = useState(true);
   const [approvedFeedback, setApprovedFeedback] = useState(null);
-  const [expandedGroups, setExpandedGroups] = useState({});
   const notificationCenterRef = useRef(null);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [arrivalFilter, setArrivalFilter] = useState("");
+  const [showMonthlyTable, setShowMonthlyTable] = useState(false);
   const theme = useTheme();
 
   const monthlyRequests = useMemo(
@@ -180,7 +174,7 @@ export default function AdminDashboard() {
   };
 
   const formatDate = (value) => {
-    if (!value) return "—";
+    if (!value) return "â€”";
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) {
       return parsed.toLocaleDateString();
@@ -188,13 +182,13 @@ export default function AdminDashboard() {
     if (typeof value === "string" && value.length > 0) {
       return value;
     }
-    return "—";
+    return "â€”";
   };
 
   const formatQuantity = (value, fractionDigits = 0) => {
-    if (value === null || value === undefined) return "—";
+    if (value === null || value === undefined) return "â€”";
     const numericValue = Number(value);
-    if (!Number.isFinite(numericValue)) return "—";
+    if (!Number.isFinite(numericValue)) return "â€”";
     return numericValue.toLocaleString(undefined, {
       minimumFractionDigits: fractionDigits,
       maximumFractionDigits: fractionDigits,
@@ -209,13 +203,6 @@ export default function AdminDashboard() {
   const handleCloseUserDialog = () => {
     setIsUserDialogOpen(false);
     setUserFeedback(null);
-  };
-
-  const toggleGroup = (groupId) => {
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [groupId]: !prev[groupId],
-    }));
   };
 
   const { totalUsers, confirmerCount, requesterCount } = useMemo(() => {
@@ -237,9 +224,9 @@ export default function AdminDashboard() {
   }, [users]);
 
   const formatNumber = (value) => {
-    if (value === null || value === undefined) return "—";
+    if (value === null || value === undefined) return "â€”";
     const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return "—";
+    if (!Number.isFinite(numeric)) return "â€”";
     return numeric.toLocaleString();
   };
 
@@ -378,41 +365,64 @@ export default function AdminDashboard() {
     });
   }, [approvedRequests]);
 
-  const isGroupExpanded = (groupId) => Boolean(expandedGroups[groupId]);
-
-  const MetricGrid = ({ metrics }) => {
-    const visibleMetrics = metrics.filter((metric) => metric.value !== "—");
-
-    if (visibleMetrics.length === 0) {
-      return (
-        <Typography variant="body2" color="text.secondary">
-          —
-        </Typography>
-      );
+  const filteredApprovedGroups = useMemo(() => {
+    if (!arrivalFilter) {
+      return approvedGroups;
     }
 
-    return (
-      <Grid container spacing={1.5} columns={12}>
-        {visibleMetrics.map((metric) => (
-          <Grid item xs={12} sm={6} key={metric.label}>
-            <Stack spacing={0.5}>
-              <Typography variant="caption" color="text.secondary">
-                {metric.label}
-              </Typography>
-              <Typography variant="body1" fontWeight={600}>
-                {metric.value}
-              </Typography>
-              {metric.secondary && (
-                <Typography variant="caption" color="text.secondary">
-                  {metric.secondary}
-                </Typography>
-              )}
-            </Stack>
-          </Grid>
-        ))}
-      </Grid>
-    );
-  };
+    return approvedGroups.filter((group) => {
+      const dateValue = group.sharedArrivalDate ?? group.requestDate ?? "";
+      if (typeof dateValue !== "string") {
+        return false;
+      }
+      return dateValue.startsWith(arrivalFilter);
+    });
+  }, [arrivalFilter, approvedGroups]);
+
+  const displayedApprovedGroups = filteredApprovedGroups.slice(0, 5);
+
+  const capacityChips = useMemo(() => {
+    if (importMetricsLoading) {
+      return [];
+    }
+
+    const chips = [];
+
+    const pushNumberChip = (label, rawValue) => {
+      const numeric = Number(rawValue);
+      if (!Number.isFinite(numeric) || numeric === 0) {
+        return;
+      }
+      chips.push({ label, value: formatNumber(numeric) });
+    };
+
+    pushNumberChip("Total boxes", importMetrics?.totalBoxes);
+    pushNumberChip("Total pallets", importMetrics?.totalPallets);
+
+    const avgBoxes = formatQuantity(importMetrics?.averageBoxes, 2);
+    if (avgBoxes !== "—") {
+      chips.push({ label: "Avg. boxes / request", value: `${avgBoxes} boxes` });
+    }
+
+    const avgPallets = formatQuantity(importMetrics?.averagePallets, 2);
+    if (avgPallets !== "—") {
+      chips.push({
+        label: "Avg. pallets / request",
+        value: `${avgPallets} pallets`,
+      });
+    }
+
+    const total = Number(importMetrics?.totalRequests ?? 0);
+    const approved = Number(importMetrics?.approvedCount ?? 0);
+    if (total > 0 && Number.isFinite(approved)) {
+      chips.push({
+        label: "Approval ratio",
+        value: `${Math.round((approved / total) * 100)}%`,
+      });
+    }
+
+    return chips;
+  }, [importMetrics, importMetricsLoading]);
 
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
@@ -447,435 +457,379 @@ export default function AdminDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <Stack spacing={2}>
-            <NotificationPermissionBanner
-              onEnabled={() => notificationCenterRef.current?.reload()}
-            />
-            <NotificationCenter
-              ref={notificationCenterRef}
-              onUnreadCountChange={setUnreadNotifications}
-              onLoadingChange={setNotificationsLoading}
-              description="Receive instant alerts when approvers update requests or propose new arrival dates."
-              emptyMessage="No unread updates at the moment."
-            />
-          </Stack>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
-              <StatCard
-                icon={<GroupsRoundedIcon />}
-                label="Active users"
-                value={usersLoading ? "…" : totalUsers}
-                trend="Invite colleagues to streamline handoffs"
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <StatCard
-                icon={<VerifiedUserRoundedIcon />}
-                label="Confirmers"
-                value={usersLoading ? "…" : confirmerCount}
-                trend="Ensure every lane has an approval owner"
-                color="secondary"
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <StatCard
-                icon={<EventBusyRoundedIcon />}
-                label="Requesters"
-                value={usersLoading ? "…" : requesterCount}
-                trend="Balance intake across teams"
-                color="info"
-              />
-            </Grid>
-          </Grid>
-
-          <Stack spacing={1}>
-            <Typography variant="h6">Import operations snapshot</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Track request volume, approvals and near-term arrivals at a
-              glance.
-            </Typography>
-          </Stack>
-
-          {importMetricsFeedback && (
-            <Alert severity={importMetricsFeedback.severity}>
-              {importMetricsFeedback.message}
-            </Alert>
-          )}
-
-          <Grid container spacing={3}>
-            <Grid item xs={12} sm={6} lg={3}>
-              <StatCard
-                icon={<NotificationsActiveRoundedIcon />}
-                label="Unread updates"
-                value={
-                  notificationsLoading ? "…" : unreadNotifications
-                }
-                trend="Review new approvals and changes from your team"
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} lg={3}>
-              <StatCard
-                icon={<ChecklistRoundedIcon />}
-                label="Total requests"
-                value={
-                  importMetricsLoading ? "…" : importMetrics?.totalRequests ?? 0
-                }
-                trend="All submissions recorded in the system"
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} lg={3}>
-              <StatCard
-                icon={<EventAvailableRoundedIcon />}
-                label="Approved"
-                value={
-                  importMetricsLoading ? "…" : importMetrics?.approvedCount ?? 0
-                }
-                trend="Confirmed arrivals awaiting execution"
-                color="secondary"
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} lg={3}>
-              <StatCard
-                icon={<ScheduleRoundedIcon />}
-                label="Pending"
-                value={
-                  importMetricsLoading ? "…" : importMetrics?.pendingCount ?? 0
-                }
-                trend="Requests still waiting on a decision"
-                color="info"
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} lg={3}>
-              <StatCard
-                icon={<CalendarMonthRoundedIcon />}
-                label="Arrivals this week"
-                value={
-                  importMetricsLoading ? "…" : importMetrics?.upcomingWeek ?? 0
-                }
-                trend="Approved deliveries in the next seven days"
-                color="warning"
-              />
-            </Grid>
-          </Grid>
-
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<AllInboxRoundedIcon />}
-                label="Total boxes"
-                value={
-                  importMetricsLoading ? "…" : importMetrics?.totalBoxes ?? 0
-                }
-                trend="Aggregate box volume across all requests"
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<Inventory2RoundedIcon />}
-                label="Total pallets"
-                value={
-                  importMetricsLoading ? "…" : importMetrics?.totalPallets ?? 0
-                }
-                trend="Calculated pallet positions for every request"
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<AssessmentRoundedIcon />}
-                label="Avg. boxes / request"
-                value={(() => {
-                  if (importMetricsLoading) return "…";
-                  const average = importMetrics?.averageBoxes ?? 0;
-                  if (!average) return "—";
-                  return `${average} boxes`;
-                })()}
-                trend="Typical order size submitted by requesters"
-                color="secondary"
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<WarehouseRoundedIcon />}
-                label="Avg. pallets / request"
-                value={(() => {
-                  if (importMetricsLoading) return "…";
-                  const average = importMetrics?.averagePallets ?? 0;
-                  if (!average) return "—";
-                  return `${average} pallets`;
-                })()}
-                trend="Helps plan warehouse capacity"
-                color="info"
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<TrendingUpRoundedIcon />}
-                label="Approval ratio"
-                value={(() => {
-                  if (importMetricsLoading) return "…";
-                  const total = importMetrics?.totalRequests ?? 0;
-                  const approved = importMetrics?.approvedCount ?? 0;
-                  if (!total) return "—";
-                  return `${Math.round((approved / total) * 100)}%`;
-                })()}
-                trend="Share of requests that receive a green light"
-                color="success"
-              />
-            </Grid>
-          </Grid>
-
-          <Paper
-            elevation={12}
-            sx={{
-              p: { xs: 3, md: 5 },
-              borderRadius: 4,
-              background: (theme) =>
-                `linear-gradient(160deg, ${theme.palette.background.paper} 0%, ${theme.palette.action.hover} 100%)`,
-            }}
+          <SectionCard
+            title="Live notifications"
+            description="Receive instant alerts when approvers update requests or propose new arrival dates."
+            variant="minimal"
           >
-            <Stack spacing={3}>
-              <Stack spacing={0.5}>
-                <Typography variant="h6">Monthly request trend</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Compare intake volume, box totals and pallet totals month over
-                  month.
-                </Typography>
-              </Stack>
-
-              {importMetricsLoading ? (
-                <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
-                  <CircularProgress color="primary" />
-                </Box>
-              ) : monthlyRequests.length ? (
-                <Stack spacing={3}>
-                  <LineChart
-                    height={320}
-                    series={[
-                      {
-                        id: "requests",
-                        label: "Requests",
-                        data: monthlyRequests.map(
-                          (entry) => entry.requestCount ?? 0
-                        ),
-                        color: theme.palette.primary.main,
-                        curve: "monotoneX",
-                      },
-                      {
-                        id: "boxes",
-                        label: "Boxes",
-                        data: monthlyRequests.map((entry) => entry.boxTotal ?? 0),
-                        color: theme.palette.secondary.main,
-                        curve: "monotoneX",
-                      },
-                      {
-                        id: "pallets",
-                        label: "Pallets",
-                        data: monthlyRequests.map(
-                          (entry) => entry.palletTotal ?? 0
-                        ),
-                        color: theme.palette.info.main,
-                        curve: "monotoneX",
-                      },
-                    ]}
-                    xAxis={[
-                      {
-                        scaleType: "band",
-                        data: monthlyRequests.map((entry) => entry.month),
-                      },
-                    ]}
-                    margin={{ top: 40, left: 60, right: 20, bottom: 40 }}
-                    slotProps={{
-                      legend: {
-                        direction: "row",
-                        position: { vertical: "top", horizontal: "right" },
-                      },
-                    }}
-                  />
-                  <Divider />
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 600 }}>Month</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          Requests
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          Boxes
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          Pallets
-                        </TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {monthlyRequests.map((entry) => (
-                        <TableRow key={entry.month} hover>
-                          <TableCell>{entry.month}</TableCell>
-                          <TableCell align="right">
-                            {entry.requestCount}
-                          </TableCell>
-                          <TableCell align="right">{entry.boxTotal}</TableCell>
-                          <TableCell align="right">{entry.palletTotal}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Stack>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  No historical data available yet. New submissions will
-                  populate this view automatically.
-                </Typography>
-              )}
+            <Stack spacing={2}>
+              <NotificationPermissionBanner
+                onEnabled={() => notificationCenterRef.current?.reload()}
+              />
+              <NotificationCenter
+                ref={notificationCenterRef}
+                onUnreadCountChange={setUnreadNotifications}
+                onLoadingChange={setNotificationsLoading}
+                description="Receive instant alerts when approvers update requests or propose new arrival dates."
+                emptyMessage="No unread updates at the moment."
+              />
             </Stack>
-          </Paper>
-
-          <Paper
-            elevation={10}
-            sx={{
-              p: { xs: 3, md: 5 },
-              borderRadius: 4,
-              background: (theme) =>
-                `linear-gradient(160deg, ${theme.palette.common.white} 0%, ${theme.palette.grey[100]} 100%)`,
-            }}
+          </SectionCard>
+          <SectionCard
+            title="Organization health"
+            description="Monitor how many users can submit, confirm or administer requests."
+            action={
+              <Button variant="outlined" onClick={handleOpenUserDialog}>
+                Manage users
+              </Button>
+            }
+            variant="minimal"
           >
-            <Stack spacing={3}>
-              <Stack spacing={0.5}>
-                <Typography variant="h6">Top articles by volume</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Understand which articles dominate requests to align warehouse
-                  capacity and approvals.
-                </Typography>
-              </Stack>
+            {userFeedback && (
+              <Alert severity={userFeedback.severity}>{userFeedback.message}</Alert>
+            )}
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <StatCard
+                  icon={<GroupsRoundedIcon />}
+                  label="Active users"
+                  value={usersLoading ? "â€¦" : totalUsers}
+                  trend="Invite colleagues to streamline handoffs"
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <StatCard
+                  icon={<VerifiedUserRoundedIcon />}
+                  label="Confirmers"
+                  value={usersLoading ? "â€¦" : confirmerCount}
+                  trend="Ensure every lane has an approval owner"
+                  color="secondary"
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <StatCard
+                  icon={<EventBusyRoundedIcon />}
+                  label="Requesters"
+                  value={usersLoading ? "â€¦" : requesterCount}
+                  trend="Balance intake across teams"
+                  color="info"
+                />
+              </Grid>
+            </Grid>
+          </SectionCard>
 
-              {importMetricsLoading ? (
-                <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
-                  <CircularProgress color="primary" />
-                </Box>
-              ) : topArticleGroups.length ? (
-                <Stack spacing={3}>
-                  <BarChart
-                    height={360}
-                    xAxis={[
-                      {
-                        scaleType: "band",
-                        data: topArticleGroups.map((entry) => entry.article),
-                      },
-                    ]}
-                    series={[
-                      {
-                        id: "boxes",
-                        label: "Boxes",
-                        data: topArticleGroups.map((entry) => entry.boxTotal ?? 0),
-                        color: theme.palette.primary.main,
-                      },
-                      {
-                        id: "pallets",
-                        label: "Pallets",
-                        data: topArticleGroups.map(
-                          (entry) => entry.palletTotal ?? 0
-                        ),
-                        color: theme.palette.secondary.main,
-                      },
-                    ]}
-                    margin={{ top: 40, left: 60, right: 20, bottom: 80 }}
-                    slotProps={{
-                      legend: {
-                        direction: "row",
-                        position: { vertical: "top", horizontal: "right" },
-                      },
-                    }}
+          <SectionCard
+            title="Import operations snapshot"
+            description="Track request volume, approvals and near-term arrivals at a glance."
+            variant="minimal"
+          >
+            {importMetricsFeedback && (
+              <Alert severity={importMetricsFeedback.severity}>
+                {importMetricsFeedback.message}
+              </Alert>
+            )}
+            <Grid container spacing={3}>
+              <Grid item xs={12} sm={6} lg={3}>
+                <StatCard
+                  icon={<NotificationsActiveRoundedIcon />}
+                  label="Unread updates"
+                  value={notificationsLoading ? "..." : unreadNotifications}
+                  trend="Review new approvals and changes from your team"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} lg={3}>
+                <StatCard
+                  icon={<ChecklistRoundedIcon />}
+                  label="Total requests"
+                  value={
+                    importMetricsLoading ? "..." : importMetrics?.totalRequests ?? 0
+                  }
+                  trend="All submissions recorded in the system"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} lg={3}>
+                <StatCard
+                  icon={<EventAvailableRoundedIcon />}
+                  label="Approved"
+                  value={
+                    importMetricsLoading ? "..." : importMetrics?.approvedCount ?? 0
+                  }
+                  trend="Confirmed arrivals awaiting execution"
+                  color="secondary"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} lg={3}>
+                <StatCard
+                  icon={<CalendarMonthRoundedIcon />}
+                  label="Arrivals this week"
+                  value={
+                    importMetricsLoading ? "..." : importMetrics?.upcomingWeek ?? 0
+                  }
+                  trend="Approved deliveries in the next seven days"
+                  color="warning"
+                />
+              </Grid>
+            </Grid>
+            {capacityChips.length > 0 && (
+              <Stack
+                direction={{ xs: "column", md: "row" }}
+                spacing={1}
+                useFlexGap
+                flexWrap="wrap"
+                sx={{ mt: 2 }}
+              >
+                {capacityChips.map((chip) => (
+                  <Chip
+                    key={chip.label}
+                    label={`${chip.label}: ${chip.value}`}
+                    size="small"
+                    variant="outlined"
                   />
-                  <Divider />
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 600 }}>Article</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          Requests
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          Approved
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          Boxes
-                        </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          Pallets
-                        </TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {topArticleGroups.map((entry) => (
-                        <TableRow key={entry.article} hover>
-                          <TableCell>{entry.article}</TableCell>
-                          <TableCell align="right">
-                            {entry.requestCount}
+                ))}
+              </Stack>
+            )}
+          </SectionCard>
+
+
+          <SectionCard
+            title="Monthly request trend"
+            description="Compare intake volume, box totals and pallet totals month over month."
+            variant="minimal"
+            action={
+              monthlyRequests.length > 0 && (
+                <Button
+                  size="small"
+                  onClick={() => setShowMonthlyTable((previous) => !previous)}
+                >
+                  {showMonthlyTable ? "Hide data table" : "Show data table"}
+                </Button>
+              )
+            }
+          >
+            {importMetricsLoading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                <CircularProgress color="primary" />
+              </Box>
+            ) : monthlyRequests.length ? (
+              <Stack spacing={3}>
+                <LineChart
+                  height={320}
+                  series={[
+                    {
+                      id: "requests",
+                      label: "Requests",
+                      data: monthlyRequests.map(
+                        (entry) => entry.requestCount ?? 0
+                      ),
+                      color: theme.palette.primary.main,
+                      curve: "monotoneX",
+                    },
+                    {
+                      id: "boxes",
+                      label: "Boxes",
+                      data: monthlyRequests.map((entry) => entry.boxTotal ?? 0),
+                      color: theme.palette.secondary.main,
+                      curve: "monotoneX",
+                    },
+                    {
+                      id: "pallets",
+                      label: "Pallets",
+                      data: monthlyRequests.map(
+                        (entry) => entry.palletTotal ?? 0
+                      ),
+                      color: theme.palette.info.main,
+                      curve: "monotoneX",
+                    },
+                  ]}
+                  xAxis={[
+                    {
+                      scaleType: "band",
+                      data: monthlyRequests.map((entry) => entry.month),
+                    },
+                  ]}
+                  margin={{ top: 40, left: 60, right: 20, bottom: 40 }}
+                  slotProps={{
+                    legend: {
+                      direction: "row",
+                      position: { vertical: "top", horizontal: "right" },
+                    },
+                  }}
+                />
+                {showMonthlyTable && (
+                  <>
+                    <Divider />
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 600 }}>Month</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Requests
                           </TableCell>
-                          <TableCell align="right">
-                            {entry.approvedCount}
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Boxes
                           </TableCell>
-                          <TableCell align="right">{entry.boxTotal}</TableCell>
-                          <TableCell align="right">
-                            {entry.palletTotal}
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Pallets
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Stack>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  No aggregated article insights are available yet. Once
-                  multiple requests are submitted this section will highlight
-                  trends automatically.
-                </Typography>
-              )}
-            </Stack>
-          </Paper>
-
-          <Paper
-            elevation={10}
-            sx={{
-              p: { xs: 3, md: 5 },
-              borderRadius: 4,
-              display: "flex",
-              flexDirection: "column",
-              gap: 3,
-            }}
-          >
-            <Stack spacing={0.5}>
-              <Typography variant="h6">Confirmed import registry</Typography>
+                      </TableHead>
+                      <TableBody>
+                        {monthlyRequests.map((entry) => (
+                          <TableRow key={entry.month} hover>
+                            <TableCell>{entry.month}</TableCell>
+                            <TableCell align="right">
+                              {entry.requestCount}
+                            </TableCell>
+                            <TableCell align="right">{entry.boxTotal}</TableCell>
+                            <TableCell align="right">{entry.palletTotal}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </>
+                )}
+              </Stack>
+            ) : (
               <Typography variant="body2" color="text.secondary">
-                Review approved requests in detail and reopen the record when
-                you need the underlying article breakdown.
+                No historical data available yet. New submissions will populate
+                this view automatically.
               </Typography>
-            </Stack>
+            )}
+          </SectionCard>
 
+          <SectionCard
+            title="Top articles by volume"
+            description="Understand which articles dominate requests to align warehouse capacity and approvals."
+            variant="minimal"
+          >
+            {importMetricsLoading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                <CircularProgress color="primary" />
+              </Box>
+            ) : topArticleGroups.length ? (
+              <Stack spacing={3}>
+                <BarChart
+                  height={360}
+                  xAxis={[
+                    {
+                      scaleType: "band",
+                      data: topArticleGroups.map((entry) => entry.article),
+                    },
+                  ]}
+                  series={[
+                    {
+                      id: "boxes",
+                      label: "Boxes",
+                      data: topArticleGroups.map((entry) => entry.boxTotal ?? 0),
+                      color: theme.palette.primary.main,
+                    },
+                    {
+                      id: "pallets",
+                      label: "Pallets",
+                      data: topArticleGroups.map(
+                        (entry) => entry.palletTotal ?? 0
+                      ),
+                      color: theme.palette.secondary.main,
+                    },
+                  ]}
+                  margin={{ top: 40, left: 60, right: 20, bottom: 80 }}
+                  slotProps={{
+                    legend: {
+                      direction: "row",
+                      position: { vertical: "top", horizontal: "right" },
+                    },
+                  }}
+                />
+                <Divider />
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600 }}>Article</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        Requests
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        Approved
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        Boxes
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        Pallets
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {topArticleGroups.map((entry) => (
+                      <TableRow key={entry.article} hover>
+                        <TableCell>{entry.article}</TableCell>
+                        <TableCell align="right">
+                          {entry.requestCount}
+                        </TableCell>
+                        <TableCell align="right">
+                          {entry.approvedCount}
+                        </TableCell>
+                        <TableCell align="right">{entry.boxTotal}</TableCell>
+                        <TableCell align="right">
+                          {entry.palletTotal}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No aggregated article insights are available yet. Once multiple
+                requests are submitted this section will highlight trends
+                automatically.
+              </Typography>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Confirmed import registry"
+            description="Review approved requests in detail and reopen the record when you need the underlying article breakdown."
+            action={
+              <TextField
+                label="Filter by arrival date"
+                type="date"
+                size="small"
+                value={arrivalFilter}
+                onChange={(event) => setArrivalFilter(event.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            }
+            secondaryAction={
+              arrivalFilter ? (
+                <Button size="small" onClick={() => setArrivalFilter("")}>
+                  Clear
+                </Button>
+              ) : null
+            }
+            variant="minimal"
+          >
             {approvedFeedback && (
               <Alert severity={approvedFeedback.severity}>
                 {approvedFeedback.message}
               </Alert>
             )}
-
             {approvedLoading ? (
               <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
                 <CircularProgress color="primary" />
               </Box>
-            ) : approvedGroups.length === 0 ? (
+            ) : displayedApprovedGroups.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                No confirmed imports are available yet. As confirmers approve
-                requests, they will appear in this registry automatically.
+                {arrivalFilter
+                  ? "No confirmed imports match this date."
+                  : "No confirmed imports are available yet."}
               </Typography>
             ) : (
               <Stack spacing={2.5}>
-                {approvedGroups.map((group) => {
-                  const sharedArrivalDate = group.sharedArrivalDate
-                    ? formatDate(group.sharedArrivalDate)
-                    : group.arrivalDateConflict
+                {displayedApprovedGroups.map((group) => {
+                  const arrivalLabel = group.arrivalDateConflict
                     ? "Multiple dates"
-                    : "—";
-
+                    : formatDate(group.sharedArrivalDate ?? group.requestDate);
                   return (
                     <Box
                       key={group.id}
@@ -886,21 +840,16 @@ export default function AdminDashboard() {
                         backgroundColor: (theme) => theme.palette.background.paper,
                       }}
                     >
-                      <Stack spacing={2.5}>
+                      <Stack spacing={1.5}>
                         <Stack
                           direction={{ xs: "column", md: "row" }}
                           spacing={1.5}
                           alignItems={{ md: "center" }}
                         >
-                          <Stack spacing={0.5}>
-                            <Typography
-                              variant="overline"
-                              color="primary"
-                              sx={{ letterSpacing: 1 }}
-                            >
-                              Request bill #{group.reference}
+                          <Stack spacing={0.25}>
+                            <Typography variant="subtitle1">
+                              {group.importer ?? "Unknown importer"}
                             </Typography>
-                            <Typography variant="h6">{group.importer}</Typography>
                             {group.requester && (
                               <Typography variant="caption" color="text.secondary">
                                 Requested by {group.requester}
@@ -915,10 +864,17 @@ export default function AdminDashboard() {
                             sx={{ ml: { md: "auto" } }}
                           />
                         </Stack>
-
-                        <Grid container spacing={3}>
-                          <Grid item xs={12} md={6}>
-                            <Stack spacing={0.5}>
+                        <Grid container spacing={2} columns={12}>
+                          <Grid item xs={12} sm={4}>
+                            <Stack spacing={0.25}>
+                              <Typography variant="caption" color="text.secondary">
+                                Arrival
+                              </Typography>
+                              <Typography variant="body1">{arrivalLabel}</Typography>
+                            </Stack>
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <Stack spacing={0.25}>
                               <Typography variant="caption" color="text.secondary">
                                 Request date
                               </Typography>
@@ -927,258 +883,53 @@ export default function AdminDashboard() {
                               </Typography>
                             </Stack>
                           </Grid>
-                          <Grid item xs={12} md={6}>
-                            <Stack spacing={0.5}>
+                          <Grid item xs={12} sm={4}>
+                            <Stack spacing={0.25}>
                               <Typography variant="caption" color="text.secondary">
-                                Arrival date
+                                Boxes / pallets
                               </Typography>
-                              <Stack direction="row" spacing={1} alignItems="center">
-                                <Typography variant="body1">
-                                  {sharedArrivalDate}
-                                </Typography>
-                                {group.arrivalDateConflict && (
-                                  <Chip
-                                    label="Multiple dates"
-                                    color="warning"
-                                    size="small"
-                                    variant="outlined"
-                                  />
-                                )}
-                              </Stack>
+                              <Typography variant="body1">
+                                {`${formatQuantity(group.totalBoxes)} boxes · ${formatQuantity(group.totalPallets)} pallets`}
+                              </Typography>
                             </Stack>
                           </Grid>
                         </Grid>
-
-                        <MetricGrid
-                          metrics={[
-                            {
-                              label: "Total boxes",
-                              value: formatQuantity(group.totalBoxes),
-                              secondary: [
-                                group.totalFullPallets
-                                  ? `${formatQuantity(group.totalFullPallets, 2)} full pallets`
-                                  : null,
-                                group.totalRemainingBoxes
-                                  ? `${formatQuantity(group.totalRemainingBoxes)} loose boxes`
-                                  : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" • ") || null,
-                            },
-                            {
-                              label: "Total pallets",
-                              value: formatQuantity(group.totalPallets),
-                            },
-                            {
-                              label: "Total shipment weight (kg)",
-                              value: formatQuantity(group.totalShipmentWeightKg, 2),
-                              secondary:
-                                group.totalWeightFullPalletsKg || group.totalWeightRemainingKg
-                                  ? [
-                                      group.totalWeightFullPalletsKg
-                                        ? `${formatQuantity(
-                                            group.totalWeightFullPalletsKg,
-                                            2
-                                          )} on full pallets`
-                                        : null,
-                                      group.totalWeightRemainingKg
-                                        ? `${formatQuantity(
-                                            group.totalWeightRemainingKg,
-                                            2
-                                          )} remaining`
-                                        : null,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" • ") || null
-                                  : null,
-                            },
-                            {
-                              label: "Total shipment volume (m³)",
-                              value: formatQuantity(group.totalShipmentVolumeM3, 3),
-                              secondary:
-                                group.totalVolumeFullPalletsM3 || group.totalVolumeRemainingM3
-                                  ? [
-                                      group.totalVolumeFullPalletsM3
-                                        ? `${formatQuantity(
-                                            group.totalVolumeFullPalletsM3,
-                                            3
-                                          )} on full pallets`
-                                        : null,
-                                      group.totalVolumeRemainingM3
-                                        ? `${formatQuantity(
-                                            group.totalVolumeRemainingM3,
-                                            3
-                                          )} remaining`
-                                        : null,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" • ") || null
-                                  : null,
-                            },
-                          ]}
-                        />
-
                         {group.comments.length > 0 && (
-                          <Stack spacing={0.5}>
-                            <Typography variant="caption" color="text.secondary">
-                              Requester notes
-                            </Typography>
-                            {group.comments.map((comment, index) => (
-                              <Typography
-                                key={`${group.id}-comment-${index}`}
-                                variant="body2"
-                                sx={{ whiteSpace: "pre-wrap" }}
-                              >
-                                {comment}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        )}
-
-                        <Collapse in={isGroupExpanded(group.id)} timeout="auto" unmountOnExit>
-                          <Stack spacing={1.5} mt={1.5}>
-                            {group.items.map((item) => (
-                              <Box
-                                key={item.ID}
-                                sx={{
-                                  p: 2.5,
-                                  borderRadius: 2,
-                                  border: (theme) =>
-                                    `1px solid ${theme.palette.action.focus}`,
-                                  backgroundColor: (theme) =>
-                                    theme.palette.action.hover,
-                                }}
-                              >
-                                <Stack spacing={1.5}>
-                                  <Stack
-                                    direction={{ xs: "column", sm: "row" }}
-                                    spacing={1}
-                                    justifyContent="space-between"
-                                    alignItems={{ sm: "center" }}
-                                  >
-                                    <Box>
-                                      <Typography variant="body1" fontWeight={600}>
-                                        {formatArticleCode(item.Article)}
-                                      </Typography>
-                                      {item.Comment && (
-                                        <Typography
-                                          variant="caption"
-                                          color="text.secondary"
-                                          sx={{ whiteSpace: "pre-wrap" }}
-                                        >
-                                          {item.Comment}
-                                        </Typography>
-                                      )}
-                                    </Box>
-                                    <Chip
-                                      label={`Boxes ${formatQuantity(item.BoxCount)} • Pallets ${formatQuantity(
-                                        item.PalletCount
-                                      )}`}
-                                      size="small"
-                                      variant="outlined"
-                                    />
-                                  </Stack>
-
-                                  <Grid container spacing={3}>
-                                    <Grid item xs={12} md={6}>
-                                      <Stack spacing={0.75}>
-                                        <Typography variant="caption" color="text.secondary">
-                                          Load plan
-                                        </Typography>
-                                        <MetricGrid
-                                          metrics={[
-                                            {
-                                              label: "Boxes",
-                                              value: formatQuantity(item.BoxCount),
-                                            },
-                                            {
-                                              label: "Pallets",
-                                              value: formatQuantity(item.PalletCount),
-                                            },
-                                            {
-                                              label: "Full pallets",
-                                              value: formatQuantity(item.FullPallets, 2),
-                                            },
-                                            {
-                                              label: "Remaining boxes",
-                                              value: formatQuantity(item.RemainingBoxes),
-                                            },
-                                          ]}
-                                        />
-                                      </Stack>
-                                    </Grid>
-                                    <Grid item xs={12} md={6}>
-                                      <Stack spacing={0.75}>
-                                        <Typography variant="caption" color="text.secondary">
-                                          Weight &amp; volume
-                                        </Typography>
-                                        <MetricGrid
-                                          metrics={[
-                                            {
-                                              label: "Total shipment weight (kg)",
-                                              value: formatQuantity(
-                                                item.TotalShipmentWeightKg,
-                                                2
-                                              ),
-                                            },
-                                            {
-                                              label: "Total shipment volume (m³)",
-                                              value: formatQuantity(
-                                                item.TotalShipmentVolumeM3,
-                                                3
-                                              ),
-                                            },
-                                            {
-                                              label: "Pallet weight (kg)",
-                                              value: formatQuantity(item.PalletWeightKg, 2),
-                                            },
-                                            {
-                                              label: "Box weight (kg)",
-                                              value: formatQuantity(item.BoxWeightKg, 2),
-                                            },
-                                          ]}
-                                        />
-                                      </Stack>
-                                    </Grid>
-                                  </Grid>
-                                </Stack>
-                              </Box>
-                            ))}
-                          </Stack>
-                        </Collapse>
-
-                        <Box
-                          sx={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 1,
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <Typography variant="caption" color="text.secondary">
-                            {isGroupExpanded(group.id)
-                              ? "Hide the detailed article breakdown"
-                              : "Show the detailed article breakdown"}
+                          <Typography variant="body2" color="text.secondary">
+                            {group.comments[0]}
+                            {group.comments.length > 1
+                              ? ` (+${group.comments.length - 1} more)`
+                              : ""}
                           </Typography>
-                          <Button
-                            size="small"
-                            variant="text"
-                            color="secondary"
-                            onClick={() => toggleGroup(group.id)}
-                          >
-                            {isGroupExpanded(group.id) ? "Hide articles" : "View articles"}
-                          </Button>
-                        </Box>
+                        )}
                       </Stack>
                     </Box>
                   );
                 })}
+                {filteredApprovedGroups.length > displayedApprovedGroups.length && (
+                  <Typography variant="caption" color="text.secondary">
+                    Showing {displayedApprovedGroups.length} of {filteredApprovedGroups.length} matching groups.
+                  </Typography>
+                )}
               </Stack>
             )}
-          </Paper>
+          </SectionCard>
 
-          <CalendarOverview description="Review confirmed import requests and prepare for upcoming arrivals." />
+          <SectionCard
+            title="Arrival calendar"
+            description="Review confirmed import requests and prepare for upcoming arrivals."
+            variant="minimal"
+          >
+            <CalendarOverview
+              description={null}
+              sx={{
+                boxShadow: "none",
+                background: "transparent",
+                border: "none",
+                p: 0,
+              }}
+            />
+          </SectionCard>
         </Stack>
       </Container>
       <UserManagementDialog

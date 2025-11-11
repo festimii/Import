@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import{ useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -21,7 +21,6 @@ import {
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
-import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import API from "../api";
@@ -29,6 +28,7 @@ import RequestGroupCard from "../components/RequestGroupCard";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
+import SectionCard from "../components/SectionCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 import NotificationCenter from "../components/NotificationCenter";
 import formatArticleCode from "../utils/formatArticle";
@@ -278,87 +278,7 @@ export default function ConfirmerDashboard() {
   };
 
   const pendingCount = groupedRequests.length;
-  const averageLoad = useMemo(() => {
-    if (pendingCount === 0) return "—";
-
-    const totals = requests.reduce(
-      (acc, request) => {
-        const palletValue = Number(request.PalletCount);
-        if (Number.isFinite(palletValue)) {
-          acc.pallets += palletValue;
-        }
-
-        const boxValue = Number(request.BoxCount);
-        if (Number.isFinite(boxValue)) {
-          acc.boxes += boxValue;
-        }
-
-        const weightValue = Number(request.TotalShipmentWeightKg);
-        if (Number.isFinite(weightValue)) {
-          acc.weight += weightValue;
-        }
-
-        const volumeValue = Number(request.TotalShipmentVolumeM3);
-        if (Number.isFinite(volumeValue)) {
-          acc.volume += volumeValue;
-        }
-
-        return acc;
-      },
-      { pallets: 0, boxes: 0, weight: 0, volume: 0 }
-    );
-
-    const formatAverage = (value, unit, fractionDigits = 0) => {
-      if (!Number.isFinite(value) || value <= 0) {
-        return null;
-      }
-      const normalized = value.toLocaleString(undefined, {
-        minimumFractionDigits: fractionDigits,
-        maximumFractionDigits: fractionDigits,
-      });
-      return `${normalized} ${unit}`;
-    };
-
-    const averages = [];
-    const boxAverage = formatAverage(totals.boxes / pendingCount, "boxes");
-    if (boxAverage) {
-      averages.push(boxAverage);
-    }
-
-    const palletAverage = formatAverage(
-      totals.pallets / pendingCount,
-      "pallets"
-    );
-    if (palletAverage) {
-      averages.push(palletAverage);
-    }
-
-    const weightAverage = formatAverage(
-      totals.weight / pendingCount,
-      "kg",
-      1
-    );
-    if (weightAverage) {
-      averages.push(weightAverage);
-    }
-
-    const volumeAverage = formatAverage(
-      totals.volume / pendingCount,
-      "m³",
-      2
-    );
-    if (volumeAverage) {
-      averages.push(volumeAverage);
-    }
-
-    if (averages.length === 0) {
-      return "—";
-    }
-
-    return averages.join(" • ");
-  }, [pendingCount, requests]);
-
-  const awaitingSchedule = useMemo(() => {
+const awaitingSchedule = useMemo(() => {
     if (groupedRequests.length === 0) return 0;
     return groupedRequests.filter((group) => {
       if (group.arrivalDateConflict) {
@@ -406,18 +326,23 @@ export default function ConfirmerDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <Stack spacing={2}>
-            <NotificationPermissionBanner
-              onEnabled={() => notificationCenterRef.current?.reload()}
-            />
-            <NotificationCenter
-              ref={notificationCenterRef}
-              onUnreadCountChange={setUnreadNotifications}
-              onLoadingChange={setNotificationsLoading}
-              description="Keep track of approvals, rejections and proposed schedules that need your attention."
-              emptyMessage="You're caught up with the latest updates."
-            />
-          </Stack>
+          <SectionCard
+            title="Live notifications"
+            description="Keep approvals, rejections and proposed schedules in one tidy feed."
+          >
+            <Stack spacing={2}>
+              <NotificationPermissionBanner
+                onEnabled={() => notificationCenterRef.current?.reload()}
+              />
+              <NotificationCenter
+                ref={notificationCenterRef}
+                onUnreadCountChange={setUnreadNotifications}
+                onLoadingChange={setNotificationsLoading}
+                description="Keep track of approvals, rejections and proposed schedules that need your attention."
+                emptyMessage="You're caught up with the latest updates."
+              />
+            </Stack>
+          </SectionCard>
           {feedback && (
             <Alert severity={feedback.severity}>{feedback.message}</Alert>
           )}
@@ -439,15 +364,6 @@ export default function ConfirmerDashboard() {
                 label="Pending decisions"
                 value={loading ? "…" : pendingCount}
                 trend="Approve or reject grouped requests to keep freight moving"
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <StatCard
-                icon={<Inventory2RoundedIcon />}
-                label="Average load"
-                value={loading ? "…" : averageLoad}
-                trend="Average boxes and pallets per pending bill"
-                color="secondary"
               />
             </Grid>
             <Grid item xs={12} md={3}>

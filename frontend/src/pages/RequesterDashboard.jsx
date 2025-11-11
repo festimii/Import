@@ -3,8 +3,9 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
+  Collapse,
   Container,
-  Divider,
   Grid,
   Paper,
   Stack,
@@ -19,12 +20,12 @@ import {
 } from "@mui/material";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
-import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
 import API from "../api";
 import formatArticleCode from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
+import SectionCard from "../components/SectionCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 import NotificationCenter from "../components/NotificationCenter";
 
@@ -87,6 +88,13 @@ const SUMMARY_METRICS = [
     fractionDigits: 3,
   },
 ];
+
+const PRIMARY_SUMMARY_KEYS = new Set([
+  "totalBoxes",
+  "totalPallets",
+  "totalShipmentWeight",
+  "totalShipmentVolume",
+]);
 
 const ITEM_COLUMNS = [
   {
@@ -151,8 +159,12 @@ export default function RequesterDashboard() {
   const [feedback, setFeedback] = useState(null);
   const [submissionDetails, setSubmissionDetails] = useState(null);
   const notificationCenterRef = useRef(null);
+  const excelInputRef = useRef(null);
+  const [excelFiles, setExcelFiles] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [showAdvancedTotals, setShowAdvancedTotals] = useState(false);
+  const [showItemBreakdown, setShowItemBreakdown] = useState(false);
 
   const handleItemChange = (index, field, value) => {
     setItems((previous) =>
@@ -170,11 +182,39 @@ export default function RequesterDashboard() {
     setItems((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
   };
 
+  const handleExcelChange = (event) => {
+    const files = Array.from(event.target.files ?? []);
+    setExcelFiles(files);
+  };
+
+  const handleExcelClear = () => {
+    setExcelFiles([]);
+    if (excelInputRef.current) {
+      excelInputRef.current.value = "";
+    }
+  };
+
+  const extractSubmittedItems = (payload) => {
+    if (!payload) {
+      return [];
+    }
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+    if (Array.isArray(payload.items)) {
+      return payload.items;
+    }
+    return [payload];
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setFeedback(null);
 
-    if (!arrivalDate) {
+    const hasExcelFiles = excelFiles.length > 0;
+    const importerValue = importer.trim();
+
+    if (!arrivalDate && !hasExcelFiles) {
       setFeedback({
         severity: "error",
         message: "Please provide an arrival date for the import.",
@@ -182,9 +222,7 @@ export default function RequesterDashboard() {
       return;
     }
 
-    const importerValue = importer.trim();
-
-    if (!importerValue) {
+    if (!importerValue && !hasExcelFiles) {
       setFeedback({
         severity: "error",
         message: "Please provide the importer name for this order.",
@@ -194,63 +232,96 @@ export default function RequesterDashboard() {
 
     const preparedItems = [];
 
-    for (let index = 0; index < items.length; index += 1) {
-      const current = items[index];
-      const trimmedArticle = (current.article ?? "").trim();
+    if (!hasExcelFiles) {
+      for (let index = 0; index < items.length; index += 1) {
+        const current = items[index];
+        const trimmedArticle = (current.article ?? "").trim();
 
-      if (!trimmedArticle) {
-        setFeedback({
-          severity: "error",
-          message: `Please provide an article code for item ${index + 1}.`,
+        if (!trimmedArticle) {
+          setFeedback({
+            severity: "error",
+            message: `Please provide an article code for item ${index + 1}.`,
+          });
+          return;
+        }
+
+        const parsedBoxCount = Number(current.boxCount);
+
+        if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
+          setFeedback({
+            severity: "error",
+            message: `Please provide a positive box quantity for item ${index + 1}.`,
+          });
+          return;
+        }
+
+        preparedItems.push({
+          article: formatArticleCode(trimmedArticle),
+          boxCount: parsedBoxCount,
         });
-        return;
       }
-
-      const parsedBoxCount = Number(current.boxCount);
-
-      if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
-        setFeedback({
-          severity: "error",
-          message: `Please provide a positive box quantity for item ${index + 1}.`,
-        });
-        return;
-      }
-
-      preparedItems.push({
-        article: formatArticleCode(trimmedArticle),
-        boxCount: parsedBoxCount,
-      });
     }
 
     try {
-      const response = await API.post("/imports", {
-        requestDate: currentDate,
-        arrivalDate,
-        importer: importerValue,
-        comment,
-        items: preparedItems,
-      });
+      let response;
+
+      if (hasExcelFiles) {
+        const formData = new FormData();
+        formData.append("requestDate", currentDate);
+        if (importerValue) {
+          formData.append("importer", importerValue);
+        }
+        if (arrivalDate) {
+          formData.append("arrivalDate", arrivalDate);
+        }
+        if (comment.trim()) {
+          formData.append("comment", comment);
+        }
+        excelFiles.forEach((file) => formData.append("files", file, file.name));
+        response = await API.post("/imports/upload", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+      } else {
+        response = await API.post("/imports", {
+          requestDate: currentDate,
+          arrivalDate,
+          importer: importerValue,
+          comment,
+          items: preparedItems,
+        });
+      }
+
       const payload = response.data;
-      const normalizedPayload = Array.isArray(payload)
-        ? payload
-        : payload
-        ? [payload]
-        : [];
+      const normalizedPayload = extractSubmittedItems(payload);
       setFeedback({
         severity: "success",
-        message: "Import order submitted successfully.",
+        message: hasExcelFiles
+          ? `Imported ${normalizedPayload.length} row${
+              normalizedPayload.length === 1 ? "" : "s"
+            } from Excel successfully.`
+          : "Import order submitted successfully.",
       });
-      setImporter("");
-      setArrivalDate("");
+      if (hasExcelFiles) {
+        setImporter(payload?.importer ?? "");
+        setArrivalDate(payload?.arrivalDate ?? "");
+      } else {
+        setImporter("");
+        setArrivalDate("");
+      }
       setItems([{ article: "", boxCount: "" }]);
       setComment("");
       setSubmissionDetails(
         normalizedPayload.length > 0 ? { items: normalizedPayload } : null
       );
+      if (hasExcelFiles) {
+        handleExcelClear();
+      }
     } catch (error) {
       setFeedback({
         severity: "error",
-        message: "Something went wrong while creating the order.",
+        message:
+          error.response?.data?.message ||
+          "Something went wrong while creating the order.",
       });
     }
   };
@@ -297,6 +368,68 @@ export default function RequesterDashboard() {
       itemCount: latestItems.length,
     };
   }, [latestItems]);
+
+  const summaryMetricGroups = useMemo(() => {
+    if (!summaryTotals) {
+      return { primary: [], secondary: [] };
+    }
+
+    const metricsWithValues = SUMMARY_METRICS.filter(
+      (metric) => summaryTotals.totals[metric.key].hasValue
+    );
+
+    return {
+      primary: metricsWithValues.filter((metric) =>
+        PRIMARY_SUMMARY_KEYS.has(metric.key)
+      ),
+      secondary: metricsWithValues.filter(
+        (metric) => !PRIMARY_SUMMARY_KEYS.has(metric.key)
+      ),
+    };
+  }, [summaryTotals]);
+
+  const renderSummaryMetric = (metric) => {
+    if (!summaryTotals) {
+      return null;
+    }
+    const metricValue = summaryTotals.totals[metric.key]?.value ?? 0;
+
+    return (
+      <Grid item xs={12} sm={6} md={4} key={metric.key}>
+        <Box
+          sx={{
+            p: 2,
+            borderRadius: 2,
+            border: "1px solid",
+            borderColor: "divider",
+            backgroundColor: "background.paper",
+          }}
+        >
+          <Typography variant="subtitle2" color="text.secondary">
+            {metric.label}
+          </Typography>
+          <Typography variant="h6">
+            {formatQuantity(metricValue, metric.fractionDigits)}
+          </Typography>
+        </Box>
+      </Grid>
+    );
+  };
+
+  const summarySnapshot = summaryTotals
+    ? [
+        { label: "Importer", value: firstSubmittedItem.Importer ?? "--" },
+        {
+          label: "Request date",
+          value: formatDateValue(firstSubmittedItem.RequestDate),
+        },
+        {
+          label: "Arrival",
+          value: formatDateValue(firstSubmittedItem.ArrivalDate),
+        },
+        { label: "Articles", value: summaryTotals.itemCount ?? 0 },
+      ]
+    : [];
 
   const formatQuantity = (value, fractionDigits = 0) => {
     if (value === null || value === undefined) {
@@ -379,47 +512,31 @@ export default function RequesterDashboard() {
                 color="secondary"
               />
             </Grid>
-            <Grid item xs={12} md={4}>
-              <StatCard
-                icon={<ChecklistRoundedIcon />}
-                label="Today’s date"
-                value={new Date(currentDate).toLocaleDateString()}
-                trend="Request date is set automatically"
-                color="info"
-              />
-            </Grid>
           </Grid>
 
-          <Stack spacing={2}>
-            <NotificationPermissionBanner
-              onEnabled={() => notificationCenterRef.current?.reload()}
-            />
-            <NotificationCenter
-              ref={notificationCenterRef}
-              onUnreadCountChange={setUnreadNotifications}
-              onLoadingChange={setNotificationsLoading}
-              description="Review confirmations, arrival proposals and reminders from your collaborators."
-              emptyMessage="You're up to date with the latest changes."
-            />
-          </Stack>
+          <SectionCard
+            title="Live notifications"
+            description="Stay informed about approvals, proposals and reminders without leaving this workspace."
+          >
+            <Stack spacing={2}>
+              <NotificationPermissionBanner
+                onEnabled={() => notificationCenterRef.current?.reload()}
+              />
+              <NotificationCenter
+                ref={notificationCenterRef}
+                onUnreadCountChange={setUnreadNotifications}
+                onLoadingChange={setNotificationsLoading}
+                description="Review confirmations, arrival proposals and reminders from your collaborators."
+                emptyMessage="You're up to date with the latest changes."
+              />
+            </Stack>
+          </SectionCard>
 
-          <Paper
-            elevation={12}
-            sx={{
-              p: { xs: 4, md: 6 },
-              background: (theme) =>
-                `linear-gradient(160deg, ${theme.palette.common.white} 0%, ${theme.palette.background.default} 100%)`,
-            }}
+          <SectionCard
+            title="Create a new import order"
+            description="Provide the request date, importer and the list of article/box combinations (Sasia - Pako) to submit a complete record."
           >
             <Stack spacing={4}>
-              <Stack spacing={1}>
-                <Typography variant="h5">Create a new import order</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Provide the request date, importer and the list of article/box
-                  combinations (Sasia - Pako) to submit a complete record.
-                </Typography>
-              </Stack>
-
               {feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
 
               <Box component="form" onSubmit={handleSubmit} noValidate>
@@ -521,6 +638,55 @@ export default function RequesterDashboard() {
                       Add another article
                     </Button>
                   </Stack>
+                  <Stack spacing={1}>
+                    <Typography variant="subtitle1">
+                      Import from Excel (optional)
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Upload spreadsheets using the required template. When files are
+                      attached, the manual article list above is ignored.
+                    </Typography>
+                    <Stack
+                      direction={{ xs: "column", sm: "row" }}
+                      spacing={2}
+                      alignItems={{ sm: "center" }}
+                    >
+                      <Button component="label" variant="outlined">
+                        Select Excel files
+                        <input
+                          type="file"
+                          hidden
+                          multiple
+                          accept=".xlsx,.xls"
+                          ref={excelInputRef}
+                          onChange={handleExcelChange}
+                        />
+                      </Button>
+                      {excelFiles.length > 0 && (
+                        <Button
+                          type="button"
+                          color="secondary"
+                          onClick={handleExcelClear}
+                        >
+                          Clear files
+                        </Button>
+                      )}
+                    </Stack>
+                    {excelFiles.length > 0 && (
+                      <Stack spacing={0.5}>
+                        {excelFiles.map((file, index) => (
+                          <Typography key={`${file.name}-${index}`} variant="body2">
+                            {file.name}
+                          </Typography>
+                        ))}
+                        <Typography variant="caption" color="text.secondary">
+                          {`Manual entries are ignored while ${excelFiles.length} file${
+                            excelFiles.length === 1 ? "" : "s"
+                          } are attached.`}
+                        </Typography>
+                      </Stack>
+                    )}
+                  </Stack>
                   <TextField
                     label="Additional context"
                     value={comment}
@@ -540,7 +706,7 @@ export default function RequesterDashboard() {
                 </Stack>
               </Box>
             </Stack>
-          </Paper>
+          </SectionCard>
 
           <CalendarOverview
             title="Arrival schedule"
@@ -548,166 +714,145 @@ export default function RequesterDashboard() {
           />
 
           {latestItems.length > 0 && (
-            <Paper
-              elevation={8}
-              sx={{
-                p: { xs: 3, md: 4 },
-                borderRadius: 4,
-                display: "flex",
-                flexDirection: "column",
-                gap: 3,
-              }}
+            <SectionCard
+              title="Latest palletization summary"
+              description="Review the calculated pallet, weight and volume metrics returned by the warehouse system for your submitted request."
             >
-              <Stack spacing={1}>
-                <Typography variant="h5">Latest palletization summary</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Review the calculated pallet, weight and volume metrics returned by
-                  the warehouse system for your submitted request.
-                </Typography>
-              </Stack>
+              <Stack spacing={3}>
+                {summarySnapshot.length > 0 && (
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={1}
+                    useFlexGap
+                    flexWrap="wrap"
+                  >
+                    {summarySnapshot.map((item) => (
+                      <Chip
+                        key={item.label}
+                        label={`${item.label}: ${item.value}`}
+                        variant="outlined"
+                        size="small"
+                      />
+                    ))}
+                  </Stack>
+                )}
 
-              <Stack
-                direction={{ xs: "column", md: "row" }}
-                spacing={{ xs: 2, md: 6 }}
-                flexWrap="wrap"
-              >
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Importer
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {firstSubmittedItem.Importer ?? "—"}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Request date
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {formatDateValue(firstSubmittedItem.RequestDate)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Arrival date (Data Arritjes)
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {formatDateValue(firstSubmittedItem.ArrivalDate)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Articles included
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {summaryTotals?.itemCount ?? 0}
-                  </Typography>
-                </Box>
-              </Stack>
-
-              {firstSubmittedItem.Comment && (
-                <Stack spacing={0.5}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Shared note
-                  </Typography>
-                  <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-                    {firstSubmittedItem.Comment}
-                  </Typography>
-                </Stack>
-              )}
-
-              {summaryTotals && (
-                <Stack spacing={2}>
+                {firstSubmittedItem.Comment && (
                   <Stack spacing={0.5}>
-                    <Typography variant="subtitle1">Aggregated totals</Typography>
-                    {summaryTotals.itemCount > 1 ? (
-                      <Typography variant="body2" color="text.secondary">
-                        Values below include every article submitted in the most
-                        recent order.
-                      </Typography>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        Values below describe the submitted article.
-                      </Typography>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Shared note
+                    </Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                      {firstSubmittedItem.Comment}
+                    </Typography>
+                  </Stack>
+                )}
+
+                {summaryTotals && (
+                  <Stack spacing={2}>
+                    <Stack
+                      direction={{ xs: "column", sm: "row" }}
+                      justifyContent="space-between"
+                      alignItems={{ xs: "flex-start", sm: "center" }}
+                      spacing={1}
+                    >
+                      <Stack spacing={0.25}>
+                        <Typography variant="subtitle1">Aggregated totals</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {summaryTotals.itemCount > 1
+                            ? "Values include every article in your latest submission."
+                            : "Values describe the most recent article submitted."}
+                        </Typography>
+                      </Stack>
+                      {summaryMetricGroups.secondary.length > 0 && (
+                        <Button
+                          type="button"
+                          size="small"
+                          onClick={() => setShowAdvancedTotals((previous) => !previous)}
+                        >
+                          {showAdvancedTotals ? "Hide advanced metrics" : "Show advanced metrics"}
+                        </Button>
+                      )}
+                    </Stack>
+                    <Grid container spacing={2}>
+                      {summaryMetricGroups.primary.map((metric) =>
+                        renderSummaryMetric(metric)
+                      )}
+                    </Grid>
+                    {summaryMetricGroups.secondary.length > 0 && (
+                      <Collapse in={showAdvancedTotals}>
+                        <Grid container spacing={2}>
+                          {summaryMetricGroups.secondary.map((metric) =>
+                            renderSummaryMetric(metric)
+                          )}
+                        </Grid>
+                      </Collapse>
                     )}
                   </Stack>
-                  <Grid container spacing={2}>
-                    {SUMMARY_METRICS.filter(
-                      (metric) => summaryTotals.totals[metric.key].hasValue
-                    ).map((metric) => (
-                      <Grid item xs={12} sm={6} md={4} key={metric.key}>
-                        <Box
-                          sx={{
-                            p: 2,
-                            borderRadius: 2,
-                            border: "1px solid",
-                            borderColor: "divider",
-                            backgroundColor: "background.paper",
-                          }}
-                        >
-                          <Typography variant="subtitle2" color="text.secondary">
-                            {metric.label}
-                          </Typography>
-                          <Typography variant="h6">
-                            {formatQuantity(
-                              summaryTotals.totals[metric.key].value,
-                              metric.fractionDigits
-                            )}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    ))}
-                  </Grid>
-                </Stack>
-              )}
+                )}
 
-              <Divider />
-
-              <Stack spacing={1}>
-                <Typography variant="subtitle1">Per-article breakdown</Typography>
-                <TableContainer
-                  component="div"
-                  sx={{
-                    overflowX: "auto",
-                    borderRadius: 2,
-                    border: "1px solid",
-                    borderColor: "divider",
-                  }}
-                >
-                  <Table size="small" stickyHeader aria-label="Palletization details">
-                    <TableHead>
-                      <TableRow>
-                        {ITEM_COLUMNS.map((column) => (
-                          <TableCell key={column.field} sx={{ whiteSpace: "nowrap" }}>
-                            {column.label}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {latestItems.map((item) => (
-                        <TableRow
-                          key={item.ID ?? `${item.Article}-${item.BoxCount}`}
-                          hover
-                        >
-                          {ITEM_COLUMNS.map((column) => {
-                            const rawValue = item[column.field];
-                            const content = column.format
-                              ? column.format(rawValue, item)
-                              : formatQuantity(rawValue, column.fractionDigits ?? 0);
-                            return (
-                              <TableCell key={column.field} sx={{ whiteSpace: "nowrap" }}>
-                                {content}
-                              </TableCell>
-                            );
-                          })}
+                <Stack spacing={1}>
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    alignItems={{ xs: "flex-start", sm: "center" }}
+                    justifyContent="space-between"
+                    spacing={1}
+                  >
+                    <Typography variant="subtitle1">Per-article breakdown</Typography>
+                    <Button
+                      type="button"
+                      size="small"
+                      onClick={() => setShowItemBreakdown((previous) => !previous)}
+                    >
+                      {showItemBreakdown ? "Hide table" : "Show table"}
+                    </Button>
+                  </Stack>
+                  <Collapse in={showItemBreakdown}>
+                    <TableContainer
+                      component="div"
+                      sx={{
+                        overflowX: "auto",
+                        borderRadius: 2,
+                        border: "1px solid",
+                        borderColor: "divider",
+                      }}
+                    >
+                    <Table size="small" stickyHeader aria-label="Palletization details">
+                      <TableHead>
+                        <TableRow>
+                          {ITEM_COLUMNS.map((column) => (
+                            <TableCell key={column.field} sx={{ whiteSpace: "nowrap" }}>
+                              {column.label}
+                            </TableCell>
+                          ))}
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                      </TableHead>
+                      <TableBody>
+                        {latestItems.map((item) => (
+                          <TableRow
+                            key={item.ID ?? `${item.Article}-${item.BoxCount}`}
+                            hover
+                          >
+                            {ITEM_COLUMNS.map((column) => {
+                              const rawValue = item[column.field];
+                              const content = column.format
+                                ? column.format(rawValue, item)
+                                : formatQuantity(rawValue, column.fractionDigits ?? 0);
+                              return (
+                                <TableCell key={column.field} sx={{ whiteSpace: "nowrap" }}>
+                                  {content}
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    </TableContainer>
+                  </Collapse>
+                </Stack>
               </Stack>
-            </Paper>
+            </SectionCard>
           )}
         </Stack>
       </Container>

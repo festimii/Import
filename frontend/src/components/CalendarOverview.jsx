@@ -3,7 +3,10 @@ import {
   Alert,
   Badge,
   Box,
+  Button,
+  Chip,
   CircularProgress,
+  Collapse,
   Divider,
   List,
   ListItem,
@@ -53,7 +56,7 @@ const CalendarOverview = ({
   const [wmsOrders, setWmsOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState(null);
-
+  const [expandedKeys, setExpandedKeys] = useState({});
   const loadRequests = useCallback(async () => {
     setLoading(true);
     setFeedback(null);
@@ -74,56 +77,55 @@ const CalendarOverview = ({
       setLoading(false);
     }
   }, []);
-
   useEffect(() => {
     loadRequests();
     const refreshHandle = setInterval(() => {
       loadRequests();
     }, 5 * 60 * 1000);
-
     return () => {
       clearInterval(refreshHandle);
     };
   }, [loadRequests]);
-
+  const toggleExpanded = useCallback((key) => {
+    setExpandedKeys((previous) => ({
+      ...previous,
+      [key]: !previous[key],
+    }));
+  }, []);
+  const isExpanded = useCallback(
+    (key) => Boolean(expandedKeys[key]),
+    [expandedKeys]
+  );
   const confirmedByDate = useMemo(() => {
     const grouped = new Map();
     confirmedRequests.forEach((request) => {
       if (!request.ArrivalDate) return;
-
       const parsed = new Date(request.ArrivalDate);
       if (Number.isNaN(parsed.getTime())) {
         return;
       }
-
       const key = formatKey(parsed);
       const events = grouped.get(key) ?? [];
       events.push(request);
       grouped.set(key, events);
     });
-
     return grouped;
   }, [confirmedRequests]);
-
   const wmsByDate = useMemo(() => {
     const grouped = new Map();
     wmsOrders.forEach((order) => {
       if (!order.ArrivalDate) return;
-
       const parsed = new Date(order.ArrivalDate);
       if (Number.isNaN(parsed.getTime())) {
         return;
       }
-
       const key = formatKey(parsed);
       const events = grouped.get(key) ?? [];
       events.push(order);
       grouped.set(key, events);
     });
-
     return grouped;
   }, [wmsOrders]);
-
   const eventsForSelectedDate = useMemo(() => {
     if (
       !(selectedDate instanceof Date) ||
@@ -131,21 +133,15 @@ const CalendarOverview = ({
     ) {
       return { confirmed: [], wms: [] };
     }
-
     const key = formatKey(selectedDate);
     return {
       confirmed: confirmedByDate.get(key) ?? [],
       wms: wmsByDate.get(key) ?? [],
     };
   }, [confirmedByDate, selectedDate, wmsByDate]);
-
-  const hasEventsForSelectedDate = useMemo(() => {
-    return (
-      eventsForSelectedDate.confirmed.length > 0 ||
-      eventsForSelectedDate.wms.length > 0
-    );
-  }, [eventsForSelectedDate]);
-
+  const hasWmsArrivals = eventsForSelectedDate.wms.length > 0;
+  const hasConfirmedArrivals = eventsForSelectedDate.confirmed.length > 0;
+  const hasEventsForSelectedDate = hasWmsArrivals || hasConfirmedArrivals;
   const formattedSelectedDate = useMemo(() => {
     if (
       !(selectedDate instanceof Date) ||
@@ -153,16 +149,87 @@ const CalendarOverview = ({
     ) {
       return "Select a date";
     }
-
     return format(selectedDate, "MMMM d, yyyy");
   }, [selectedDate]);
+  const selectedAggregates = useMemo(() => {
+    const combined = [
+      ...eventsForSelectedDate.confirmed,
+      ...eventsForSelectedDate.wms,
+    ];
+    const sumField = (field) =>
+      combined.reduce((acc, item) => {
+        const value = Number(item[field]);
+        return Number.isFinite(value) ? acc + value : acc;
+      }, 0);
+    const uniqueImporters = new Set(
+      combined.map((item) => item.Importer).filter(Boolean)
+    );
+    return {
+      combinedCount: combined.length,
+      confirmedCount: eventsForSelectedDate.confirmed.length,
+      wmsCount: eventsForSelectedDate.wms.length,
+      totalBoxes: sumField("BoxCount"),
+      totalPallets: sumField("PalletCount"),
+      uniqueImporters: uniqueImporters.size,
+    };
+  }, [eventsForSelectedDate]);
+  const quickStats = useMemo(() => {
+    const stats = [
+      {
+        label: "Selected date",
+        value: formattedSelectedDate,
+        caption: selectedAggregates.combinedCount
+          ? `Showing ${selectedAggregates.combinedCount} arrival${
+              selectedAggregates.combinedCount === 1 ? "" : "s"
+            }`
+          : "No arrivals scheduled",
+      },
+    ];
 
+    if (selectedAggregates.confirmedCount > 0) {
+      stats.push({
+        label: "Confirmed",
+        value: formatNumeric(selectedAggregates.confirmedCount),
+      });
+    }
+
+    if (selectedAggregates.wmsCount > 0) {
+      stats.push({
+        label: "WMS arrivals",
+        value: formatNumeric(selectedAggregates.wmsCount),
+      });
+    }
+
+    if (selectedAggregates.totalBoxes > 0) {
+      stats.push({
+        label: "Total boxes",
+        value: formatNumeric(selectedAggregates.totalBoxes),
+        caption: "Confirmed + WMS",
+      });
+    }
+
+    if (selectedAggregates.totalPallets > 0) {
+      stats.push({
+        label: "Total pallets",
+        value: formatNumeric(selectedAggregates.totalPallets),
+        caption: "Confirmed + WMS",
+      });
+    }
+
+    if (selectedAggregates.uniqueImporters > 0) {
+      stats.push({
+        label: "Unique importers",
+        value: formatNumeric(selectedAggregates.uniqueImporters),
+      });
+    }
+
+    return stats;
+  }, [formattedSelectedDate, selectedAggregates]);
   const renderDay = (dayProps) => {
     const { day, selectedDay, outsideCurrentMonth } = dayProps;
     if (!(day instanceof Date) || Number.isNaN(day.getTime())) {
       return <PickersDay {...dayProps} />;
     }
-
     const key = formatKey(day);
     const confirmedEvents = confirmedByDate.get(key) ?? [];
     const wmsEvents = wmsByDate.get(key) ?? [];
@@ -170,7 +237,6 @@ const CalendarOverview = ({
     const wmsCount = wmsEvents.length;
     const hasConfirmed = confirmedCount > 0;
     const hasWms = wmsCount > 0;
-
     let dayNode = (
       <PickersDay
         {...dayProps}
@@ -202,7 +268,6 @@ const CalendarOverview = ({
         }}
       />
     );
-
     if (hasWms) {
       dayNode = (
         <Badge
@@ -222,7 +287,6 @@ const CalendarOverview = ({
         </Badge>
       );
     }
-
     if (hasConfirmed) {
       dayNode = (
         <Badge
@@ -242,56 +306,42 @@ const CalendarOverview = ({
         </Badge>
       );
     }
-
     return dayNode;
   };
-
   const renderDetailRows = (details, options = {}) => {
     const { commentLabel = "Note" } = options;
     const detailItems = Array.isArray(details)
       ? details.filter(Boolean)
       : [];
     const hasComment = Boolean(options.comment);
-
     if (detailItems.length === 0 && !hasComment) {
       return null;
     }
-
-    const midpoint = Math.ceil(detailItems.length / 2);
-    const rows = [
-      detailItems.slice(0, midpoint),
-      detailItems.slice(midpoint),
-    ].filter((row) => row.length > 0);
-
     return (
-      <Stack spacing={0.5} sx={{ mt: 0.5 }}>
-        {rows.map((row, rowIndex) => (
+      <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+        {detailItems.length > 0 && (
           <Stack
-            key={rowIndex}
             direction="row"
-            spacing={1.5}
+            spacing={0.75}
             useFlexGap
             flexWrap="wrap"
           >
-            {row.map((detail) => (
-              <Typography
-                key={detail}
-                component="span"
-                variant="caption"
-                color="text.secondary"
-                sx={{ fontWeight: 500 }}
-              >
-                {detail}
-              </Typography>
+            {detailItems.map((detail, index) => (
+              <Chip
+                key={`${detail}-${index}`}
+                label={detail}
+                size="small"
+                variant="outlined"
+              />
             ))}
           </Stack>
-        ))}
+        )}
         {hasComment && (
           <Typography
             component="span"
             variant="caption"
             color="text.secondary"
-            sx={{ display: "block", mt: 0.5, whiteSpace: "pre-wrap" }}
+            sx={{ display: "block", whiteSpace: "pre-wrap" }}
           >
             {commentLabel}: {options.comment}
           </Typography>
@@ -299,7 +349,6 @@ const CalendarOverview = ({
       </Stack>
     );
   };
-
   return (
     <Paper
       elevation={12}
@@ -324,11 +373,211 @@ const CalendarOverview = ({
             </Typography>
           )}
         </Box>
+        {quickStats.length > 0 && (
+          <Box
+            sx={{
+              display: "grid",
+              gap: 2,
+              gridTemplateColumns: {
+                xs: "repeat(auto-fit, minmax(160px, 1fr))",
+              },
+            }}
+          >
+            {quickStats.map((stat) => (
+              <Box
+                key={stat.label}
+                sx={{
+                  p: 2.5,
+                  borderRadius: 3,
+                  border: (theme) =>
+                    `1px solid ${alpha(theme.palette.primary.main, 0.12)}`,
+                  backgroundColor: (theme) =>
+                    alpha(theme.palette.primary.light, 0.08),
+                }}
+              >
+                <Typography
+                  variant="overline"
+                  sx={{ letterSpacing: 1.2, color: "text.secondary" }}
+                >
+                  {stat.label}
+                </Typography>
+                <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                  {stat.value}
+                </Typography>
+                {stat.caption && (
+                  <Typography variant="caption" color="text.secondary">
+                    {stat.caption}
+                  </Typography>
+                )}
+              </Box>
+                  ))}
+                </Box>
+              )}
+              {hasConfirmedArrivals && (
+                <Box>
+                  <Typography
+                    variant="subtitle2"
+                    color="success.main"
+                    sx={{ mb: 1 }}
+                  >
+                    Confirmed import requests (
+                    {eventsForSelectedDate.confirmed.length})
+                  </Typography>
+                  <List
+                    dense
+                    disablePadding
+                    sx={{
+                      display: "grid",
+                      gap: 1.5,
+                      gridTemplateColumns: {
+                        xs: "repeat(auto-fit, minmax(260px, 1fr))",
+                      },
+                      alignItems: "stretch",
+                    }}
+                  >
+                    {eventsForSelectedDate.confirmed.map((request, index) => {
+                      const requestDate = (() => {
+                        if (!request.RequestDate) return "N/A";
+                        const parsed = new Date(request.RequestDate);
+                        if (Number.isNaN(parsed.getTime())) {
+                          return request.RequestDate;
+                        }
+                        return format(parsed, "MMMM d, yyyy");
+                      })();
 
+                      const arrivalDate = (() => {
+                        if (!request.ArrivalDate) return "N/A";
+                        const parsed = new Date(request.ArrivalDate);
+                        if (Number.isNaN(parsed.getTime())) {
+                          return request.ArrivalDate;
+                        }
+                        return format(parsed, "MMMM d, yyyy");
+                      })();
+
+                      const chipItems = [
+                        arrivalDate && `Arrival: ${arrivalDate}`,
+                        Number.isFinite(Number(request.BoxCount))
+                          ? `Boxes: ${formatNumeric(request.BoxCount)}`
+                          : null,
+                        Number.isFinite(Number(request.PalletCount))
+                          ? `Pallets: ${formatNumeric(request.PalletCount)}`
+                          : null,
+                        request.ConfirmedBy
+                          ? `Confirmed by ${request.ConfirmedBy}`
+                          : null,
+                      ].filter(Boolean);
+
+                      const detailItems = [
+                        Number.isFinite(Number(request.FullPallets))
+                          ? `Full pallets: ${formatNumeric(request.FullPallets, 2)}`
+                          : null,
+                        Number.isFinite(Number(request.RemainingBoxes))
+                          ? `Remaining boxes: ${formatNumeric(request.RemainingBoxes)}`
+                          : null,
+                        Number.isFinite(Number(request.TotalShipmentWeightKg))
+                          ? `Total weight (kg): ${formatNumeric(request.TotalShipmentWeightKg, 2)}`
+                          : null,
+                        Number.isFinite(Number(request.TotalShipmentVolumeM3))
+                          ? `Total volume (m3): ${formatNumeric(request.TotalShipmentVolumeM3, 3)}`
+                          : null,
+                        Number.isFinite(Number(request.PalletVolumeUtilization))
+                          ? `Utilization: ${formatPercent(request.PalletVolumeUtilization)}`
+                          : null,
+                        requestDate && `Request date: ${requestDate}`,
+                      ];
+
+                      const detailKey = `confirmed-${request.ID ?? index}`;
+                      const hasExpandedDetails =
+                        detailItems.some(Boolean) || Boolean(request.Comment);
+
+                      return (
+                        <ListItem
+                          key={request.ID ?? `${index}-${request.Article ?? "article"}`}
+                          alignItems="flex-start"
+                          disableGutters
+                          sx={{
+                            borderRadius: 2,
+                            px: 1.5,
+                            py: 1,
+                            backgroundColor: (theme) =>
+                              alpha(theme.palette.success.main, 0.08),
+                            border: (theme) =>
+                              `1px solid ${alpha(
+                                theme.palette.success.main,
+                                0.2
+                              )}`,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 0.5,
+                          }}
+                        >
+                          <ListItemText
+                            primaryTypographyProps={{
+                              variant: "body2",
+                              fontWeight: 600,
+                              color: "text.primary",
+                            }}
+                            secondaryTypographyProps={{
+                              component: "div",
+                            }}
+                            primary={`${
+                              request.Importer ?? "Unknown importer"
+                            } - ${
+                              request.Article
+                                ? formatArticleCode(request.Article)
+                                : "Article N/A"
+                            }`}
+                            secondary={
+                              <Stack spacing={0.75}>
+                                {chipItems.length > 0 && (
+                                  <Stack
+                                    direction="row"
+                                    spacing={0.75}
+                                    useFlexGap
+                                    flexWrap="wrap"
+                                  >
+                                    {chipItems.map((chip) => (
+                                      <Chip
+                                        key={chip}
+                                        label={chip}
+                                        size="small"
+                                        variant="outlined"
+                                      />
+                                    ))}
+                                  </Stack>
+                                )}
+                                {hasExpandedDetails && (
+                                  <>
+                                    <Button
+                                      type="button"
+                                      size="small"
+                                      onClick={() => toggleExpanded(detailKey)}
+                                      sx={{ alignSelf: "flex-start" }}
+                                    >
+                                      {isExpanded(detailKey)
+                                        ? "Hide details"
+                                        : "Full metrics"}
+                                    </Button>
+                                    <Collapse in={isExpanded(detailKey)}>
+                                      {renderDetailRows(detailItems, {
+                                        comment: request.Comment,
+                                        commentLabel: "Note",
+                                      })}
+                                    </Collapse>
+                                  </>
+                                )}
+                              </Stack>
+                            }
+                          />
+                        </ListItem>
+                      );
+                    })}
+                  </List>
+                </Box>
+              )}
         {feedback && (
           <Alert severity={feedback.severity}>{feedback.message}</Alert>
         )}
-
         {loading ? (
           <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
             <CircularProgress color="primary" />
@@ -338,26 +587,29 @@ const CalendarOverview = ({
             direction={{ xs: "column", md: "row" }}
             spacing={4}
             alignItems="stretch"
+            sx={{ flexWrap: { xs: "wrap", md: "nowrap" }, rowGap: 4 }}
           >
-            <LocalizationProvider dateAdapter={AdapterDateFns}>
-              <DateCalendar
-                value={selectedDate}
-                onChange={(value) => value && setSelectedDate(value)}
-                slots={{ day: renderDay }}
-                sx={{
-                  borderRadius: 4,
-                  p: 2,
-                  "& .MuiPickersCalendarHeader-label": {
-                    fontWeight: 600,
-                  },
-                  "& .MuiDayCalendar-weekDayLabel": {
-                    fontWeight: 500,
-                  },
-                }}
-              />
-            </LocalizationProvider>
-
-            <Box sx={{ flexGrow: 1 }}>
+            <Box sx={{ flexShrink: 0, minWidth: { xs: "100%", md: 320 } }}>
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DateCalendar
+                  value={selectedDate}
+                  onChange={(value) => value && setSelectedDate(value)}
+                  slots={{ day: renderDay }}
+                  sx={{
+                    borderRadius: 4,
+                    p: 2,
+                    width: "100%",
+                    "& .MuiPickersCalendarHeader-label": {
+                      fontWeight: 600,
+                    },
+                    "& .MuiDayCalendar-weekDayLabel": {
+                      fontWeight: 500,
+                    },
+                  }}
+                />
+              </LocalizationProvider>
+            </Box>
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
               <Typography variant="subtitle1" gutterBottom>
                 {formattedSelectedDate}
               </Typography>
@@ -367,8 +619,17 @@ const CalendarOverview = ({
                   No arrivals scheduled for this day.
                 </Typography>
               ) : (
-                <Stack spacing={3}>
-                  {eventsForSelectedDate.wms.length > 0 && (
+                <Box
+                  sx={{
+                    display: "grid",
+                    gap: 2.5,
+                    gridTemplateColumns: {
+                      xs: "1fr",
+                    },
+                    alignItems: "flex-start",
+                  }}
+                >
+                  {hasWmsArrivals && (
                     <Box>
                       <Typography
                         variant="subtitle2"
@@ -377,195 +638,162 @@ const CalendarOverview = ({
                       >
                         WMS arrivals ({eventsForSelectedDate.wms.length})
                       </Typography>
-                      <List dense sx={{ p: 0 }}>
-                        {eventsForSelectedDate.wms.map((order, index) => (
-                          <ListItem
-                            key={`wms-${
-                              order.NarID ??
-                              order.OrderNumber ??
-                              `${index}-${order.Article ?? "order"}`
-                            }`}
-                            alignItems="flex-start"
-                            sx={{
-                              borderRadius: 3,
-                              mb: 1.5,
-                              backgroundColor: (theme) =>
-                                alpha(theme.palette.error.main, 0.08),
-                              border: (theme) =>
-                                `1px solid ${alpha(
-                                  theme.palette.error.main,
-                                  0.25
-                                )}`,
-                            }}
-                          >
-                            <ListItemText
-                              primaryTypographyProps={{
-                                variant: "body2",
-                                fontWeight: 600,
-                                color: "text.primary",
-                              }}
-                              secondaryTypographyProps={{
-                                component: "div",
-                              }}
-                              primary={`${
-                                order.Importer ?? "Unknown importer"
-                              } · ${
-                                order.OrderNumber
-                                  ? `Order ${order.OrderNumber}`
-                                  : `NarID ${order.NarID ?? "N/A"}`
-                              }`}
-                              secondary={(() => {
-                                const arrivalDate = (() => {
-                                  if (!order.ArrivalDate) return "N/A";
-                                  const parsed = new Date(order.ArrivalDate);
-                                  if (Number.isNaN(parsed.getTime())) {
-                                    return order.ArrivalDate;
-                                  }
-                                  return format(parsed, "MMMM d, yyyy");
-                                })();
-
-                                const sourceUpdated = (() => {
-                                  if (!order.SourceUpdatedAt) return null;
-                                  const parsed = new Date(
-                                    order.SourceUpdatedAt
-                                  );
-                                  if (Number.isNaN(parsed.getTime())) {
-                                    return order.SourceUpdatedAt;
-                                  }
-                                  return format(parsed, "MMMM d, yyyy HH:mm");
-                                })();
-
-                                const details = [
-                                  `Arrival: ${arrivalDate}`,
-                                  order.Article
-                                    ? `Article: ${formatArticleCode(
-                                        order.Article
-                                      )}`
-                                    : null,
-                                  order.ArticleDescription
-                                    ? `Description: ${order.ArticleDescription}`
-                                    : null,
-                                  `Boxes: ${formatNumeric(order.BoxCount)}`,
-                                  `Pallets: ${formatNumeric(
-                                    order.PalletCount
-                                  )}`,
-                                  sourceUpdated
-                                    ? `Source updated: ${sourceUpdated}`
-                                    : null,
-                                ];
-
-                                return renderDetailRows(details, {
-                                  comment: order.Comment,
-                                  commentLabel: "Comment",
-                                });
-                              })()}
-                            />
-                          </ListItem>
-                        ))}
-                      </List>
-                    </Box>
-                  )}
-
-                  {eventsForSelectedDate.confirmed.length > 0 && (
-                    <Box>
-                      <Typography
-                        variant="subtitle2"
-                        color="success.main"
-                        sx={{ mb: 1 }}
+                      <List
+                        dense
+                        disablePadding
+                        sx={{
+                          display: "grid",
+                          gap: 1.5,
+                          gridTemplateColumns: {
+                            xs: "repeat(auto-fit, minmax(260px, 1fr))",
+                          },
+                          alignItems: "stretch",
+                        }}
                       >
-                        Confirmed import requests (
-                        {eventsForSelectedDate.confirmed.length})
-                      </Typography>
-                      <List dense sx={{ p: 0 }}>
-                        {eventsForSelectedDate.confirmed.map((request) => (
-                          <ListItem
-                            key={request.ID}
-                            alignItems="flex-start"
-                            sx={{
-                              borderRadius: 3,
-                              mb: 1.5,
-                              backgroundColor: (theme) =>
-                                alpha(theme.palette.success.main, 0.08),
-                              border: (theme) =>
-                                `1px solid ${alpha(
-                                  theme.palette.success.main,
-                                  0.2
-                                )}`,
-                            }}
-                          >
-                            <ListItemText
-                              primaryTypographyProps={{
-                                variant: "body2",
-                                fontWeight: 600,
-                                color: "text.primary",
+                        {eventsForSelectedDate.wms.map((order, index) => {
+                          const arrivalDate = (() => {
+                            if (!order.ArrivalDate) return "N/A";
+                            const parsed = new Date(order.ArrivalDate);
+                            if (Number.isNaN(parsed.getTime())) {
+                              return order.ArrivalDate;
+                            }
+                            return format(parsed, "MMMM d, yyyy");
+                          })();
+
+
+                          const sourceUpdated = (() => {
+                            if (!order.SourceUpdatedAt) return null;
+                            const parsed = new Date(order.SourceUpdatedAt);
+                            if (Number.isNaN(parsed.getTime())) {
+                              return order.SourceUpdatedAt;
+                            }
+                            return format(parsed, "MMMM d, yyyy HH:mm");
+                          })();
+
+
+                          const chipItems = [
+                            arrivalDate && `Arrival: ${arrivalDate}`,
+                            order.Article
+                              ? `Article: ${formatArticleCode(order.Article)}`
+                              : null,
+                            Number.isFinite(Number(order.BoxCount))
+                              ? `Boxes: ${formatNumeric(order.BoxCount)}`
+                              : null,
+                            Number.isFinite(Number(order.PalletCount))
+                              ? `Pallets: ${formatNumeric(order.PalletCount)}`
+                              : null,
+                          ].filter(Boolean);
+
+
+                          const detailItems = [
+                            order.ArticleDescription
+                              ? `Description: ${order.ArticleDescription}`
+                              : null,
+                            sourceUpdated
+                              ? `Source updated: ${sourceUpdated}`
+                              : null,
+                          ];
+
+
+                          const detailKey = `wms-${
+                            order.NarID ??
+                            order.OrderNumber ??
+                            `${index}-${order.Article ?? "order"}`
+                          }`;
+                          const hasExpandedDetails =
+                            detailItems.some(Boolean) || Boolean(order.Comment);
+
+
+                          return (
+                            <ListItem
+                              key={detailKey}
+                              alignItems="flex-start"
+                              disableGutters
+                              sx={{
+                                borderRadius: 2,
+                                px: 1.5,
+                                py: 1,
+                                backgroundColor: (theme) =>
+                                  alpha(theme.palette.error.main, 0.08),
+                                border: (theme) =>
+                                  `1px solid ${alpha(
+                                    theme.palette.error.main,
+                                    0.25
+                                  )}`,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 0.5,
                               }}
-                              secondaryTypographyProps={{
-                                component: "div",
-                              }}
-                              primary={`${
-                                request.Importer
-                              } · ${formatArticleCode(request.Article)}`}
-                              secondary={(() => {
-                                const requestDate = (() => {
-                                  if (!request.RequestDate) return "N/A";
-                                  const parsed = new Date(request.RequestDate);
-                                  if (Number.isNaN(parsed.getTime())) {
-                                    return request.RequestDate;
-                                  }
-                                  return format(parsed, "MMMM d, yyyy");
-                                })();
+                            >
+                              <ListItemText
+                                primaryTypographyProps={{
+                                  variant: "body2",
+                                  fontWeight: 600,
+                                  color: "text.primary",
+                                }}
+                                secondaryTypographyProps={{
+                                  component: "div",
+                                }}
+                                primary={`${
+                                  order.Importer ?? "Unknown importer"
+                                } - ${
+                                  order.OrderNumber
+                                    ? `Order ${order.OrderNumber}`
+                                    : `NarID ${order.NarID ?? "N/A"}`
+                                }`}
+                                secondary={
+                                  <Stack spacing={0.75}>
+                                    {chipItems.length > 0 && (
+                                      <Stack
+                                        direction="row"
+                                        spacing={0.75}
+                                        useFlexGap
+                                        flexWrap="wrap"
+                                      >
+                                        {chipItems.map((chip) => (
+                                          <Chip
+                                            key={chip}
+                                            label={chip}
+                                            size="small"
+                                            variant="outlined"
+                                          />
+                                        ))}
+                                      </Stack>
+                                    )}
 
-                                const arrivalDate = (() => {
-                                  if (!request.ArrivalDate) return "N/A";
-                                  const parsed = new Date(request.ArrivalDate);
-                                  if (Number.isNaN(parsed.getTime())) {
-                                    return request.ArrivalDate;
-                                  }
-                                  return format(parsed, "MMMM d, yyyy");
-                                })();
 
-                                const details = [
-                                  `Arrival: ${arrivalDate}`,
-                                  `Boxes: ${formatNumeric(request.BoxCount)}`,
-                                  `Pallets: ${formatNumeric(
-                                    request.PalletCount
-                                  )}`,
-                                  `Full pallets: ${formatNumeric(
-                                    request.FullPallets,
-                                    2
-                                  )}`,
-                                  `Remaining boxes: ${formatNumeric(
-                                    request.RemainingBoxes
-                                  )}`,
-                                  `Total weight (kg): ${formatNumeric(
-                                    request.TotalShipmentWeightKg,
-                                    2
-                                  )}`,
-                                  `Total volume (m³): ${formatNumeric(
-                                    request.TotalShipmentVolumeM3,
-                                    3
-                                  )}`,
-                                  `Utilization: ${formatPercent(
-                                    request.PalletVolumeUtilization
-                                  )}`,
-                                  `Request date: ${requestDate}`,
-                                  `Confirmed by ${
-                                    request.ConfirmedBy ?? "Unknown"
-                                  }`,
-                                ];
-
-                                return renderDetailRows(details, {
-                                  comment: request.Comment,
-                                  commentLabel: "Note",
-                                });
-                              })()}
-                            />
-                          </ListItem>
-                        ))}
+                                    {hasExpandedDetails && (
+                                      <>
+                                        <Button
+                                          type="button"
+                                          size="small"
+                                          onClick={() =>
+                                            toggleExpanded(detailKey)
+                                          }
+                                          sx={{ alignSelf: "flex-start" }}
+                                        >
+                                          {isExpanded(detailKey)
+                                            ? "Hide details"
+                                            : "Full metrics"}
+                                        </Button>
+                                        <Collapse in={isExpanded(detailKey)}>
+                                          {renderDetailRows(detailItems, {
+                                            comment: order.Comment,
+                                            commentLabel: "Comment",
+                                          })}
+                                        </Collapse>
+                                      </>
+                                    )}
+                                  </Stack>
+                                }
+                              />
+                            </ListItem>
+                          );
+                        })}
                       </List>
                     </Box>
                   )}
-                </Stack>
+                </Box>
               )}
             </Box>
           </Stack>
@@ -576,3 +804,7 @@ const CalendarOverview = ({
 };
 
 export default CalendarOverview;
+
+
+
+

@@ -33,7 +33,8 @@ CREATE TABLE [dbo].[ImportRequests](
     [Useri] NVARCHAR(100) NULL,                           -- user creating the request
     [Status] NVARCHAR(20) NOT NULL DEFAULT ('pending'),   -- pending/approved/rejected
     [ConfirmedBy] NVARCHAR(100) NULL,                     -- who confirmed
-    [CreatedAt] DATETIME NOT NULL DEFAULT (GETDATE())     -- creation timestamp
+    [CreatedAt] DATETIME NOT NULL DEFAULT (GETDATE()),    -- creation timestamp
+    [BatchId] UNIQUEIDENTIFIER NOT NULL DEFAULT (NEWID()) -- group identifier for multi-row submissions
 );
 GO
 
@@ -58,4 +59,43 @@ BEGIN
         ON DELETE CASCADE
   );
 END;
+GO
+
+IF OBJECT_ID('dbo.ImportRequestExcelDetails', 'U') IS NOT NULL
+    DROP TABLE dbo.ImportRequestExcelDetails;
+GO
+
+CREATE TABLE dbo.ImportRequestExcelDetails (
+    ID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    RequestID INT NOT NULL UNIQUE,
+    BatchId UNIQUEIDENTIFIER NOT NULL,
+    SupplierCode NVARCHAR(100) NULL,
+    SupplierName NVARCHAR(255) NULL,
+    SupplierAddress NVARCHAR(500) NULL,
+    SupplierContact NVARCHAR(100) NULL,
+    SupplierEmail NVARCHAR(255) NULL,
+    Barcode NVARCHAR(100) NULL,
+    ArticleName NVARCHAR(255) NULL,
+    UnitOfMeasure NVARCHAR(100) NULL,
+    PiecesPerPack DECIMAL(18, 6) NULL,
+    PacksPerPallet DECIMAL(18, 6) NULL,
+    PalletQuantity DECIMAL(18, 6) NULL,
+    TransportMode NVARCHAR(255) NULL,
+    PalletReturn NVARCHAR(255) NULL,
+    PaymentTermsDays INT NULL,
+    LeadTimeDays INT NULL,
+    PlannedArrivalDate DATE NULL,
+    SourceFileName NVARCHAR(255) NULL,
+    SourceSheetName NVARCHAR(255) NULL,
+    CreatedAt DATETIME NOT NULL DEFAULT (GETDATE()),
+    CONSTRAINT FK_ImportRequestExcelDetails_Request FOREIGN KEY (RequestID)
+        REFERENCES dbo.ImportRequests(ID)
+        ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX UX_ImportRequestExcelDetails_Request
+    ON dbo.ImportRequestExcelDetails (RequestID);
+
+CREATE INDEX IX_ImportRequestExcelDetails_BatchId
+    ON dbo.ImportRequestExcelDetails (BatchId);
 GO
