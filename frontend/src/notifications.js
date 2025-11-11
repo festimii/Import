@@ -12,7 +12,7 @@ const resolveBackendUrl = () => {
     }
   }
 
-  return "http://localhost:5000";
+  return "http://192.168.100.35:5000";
 };
 
 const BACKEND_URL = resolveBackendUrl();
