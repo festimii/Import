@@ -9,7 +9,14 @@ import { startWmsOrdersSync } from "./services/wmsOrdersSync.js";
 dotenv.config();
 const app = express();
 
-app.use(cors({ origin: "http://192.168.100.35:5173" }));
+app.use(
+  cors({
+    origin: "*", // allow all origins
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 
 // Routes
