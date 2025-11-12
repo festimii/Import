@@ -434,9 +434,12 @@ export default function AdminDashboard() {
         display: "flex",
         flexDirection: "column",
         background: (theme) =>
-          `linear-gradient(180deg, ${alpha(theme.palette.primary.light, 0.12)} 0%, ${
-            theme.palette.background.default
-          } 40%, ${theme.palette.background.paper} 100%)`,
+          `linear-gradient(180deg, ${alpha(
+            theme.palette.primary.light,
+            0.12
+          )} 0%, ${theme.palette.background.default} 40%, ${
+            theme.palette.background.paper
+          } 100%)`,
       }}
     >
       <PageHero
@@ -562,7 +565,9 @@ export default function AdminDashboard() {
             }
           >
             {userFeedback && (
-              <Alert severity={userFeedback.severity}>{userFeedback.message}</Alert>
+              <Alert severity={userFeedback.severity}>
+                {userFeedback.message}
+              </Alert>
             )}
             <Grid container spacing={3}>
               <Grid item xs={12} md={4}>
@@ -617,7 +622,9 @@ export default function AdminDashboard() {
                   icon={<ChecklistRoundedIcon />}
                   label="Total requests"
                   value={
-                    importMetricsLoading ? "..." : importMetrics?.totalRequests ?? 0
+                    importMetricsLoading
+                      ? "..."
+                      : importMetrics?.totalRequests ?? 0
                   }
                   trend="All submissions recorded in the system"
                 />
@@ -627,7 +634,9 @@ export default function AdminDashboard() {
                   icon={<EventAvailableRoundedIcon />}
                   label="Approved"
                   value={
-                    importMetricsLoading ? "..." : importMetrics?.approvedCount ?? 0
+                    importMetricsLoading
+                      ? "..."
+                      : importMetrics?.approvedCount ?? 0
                   }
                   trend="Confirmed arrivals awaiting execution"
                   color="secondary"
@@ -638,7 +647,9 @@ export default function AdminDashboard() {
                   icon={<CalendarMonthRoundedIcon />}
                   label="Arrivals this week"
                   value={
-                    importMetricsLoading ? "..." : importMetrics?.upcomingWeek ?? 0
+                    importMetricsLoading
+                      ? "..."
+                      : importMetrics?.upcomingWeek ?? 0
                   }
                   trend="Approved deliveries in the next seven days"
                   color="warning"
@@ -662,112 +673,6 @@ export default function AdminDashboard() {
                   />
                 ))}
               </Stack>
-            )}
-          </SectionCard>
-
-
-          <SectionCard
-            title="Monthly request trend"
-            description="Compare intake volume, box totals and pallet totals month over month."
-            action={
-              monthlyRequests.length > 0 && (
-                <Button
-                  size="small"
-                  onClick={() => setShowMonthlyTable((previous) => !previous)}
-                >
-                  {showMonthlyTable ? "Hide data table" : "Show data table"}
-                </Button>
-              )
-            }
-          >
-            {importMetricsLoading ? (
-              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
-                <CircularProgress color="primary" />
-              </Box>
-            ) : monthlyRequests.length ? (
-              <Stack spacing={3}>
-                <LineChart
-                  height={320}
-                  series={[
-                    {
-                      id: "requests",
-                      label: "Requests",
-                      data: monthlyRequests.map(
-                        (entry) => entry.requestCount ?? 0
-                      ),
-                      color: theme.palette.primary.main,
-                      curve: "monotoneX",
-                    },
-                    {
-                      id: "boxes",
-                      label: "Boxes",
-                      data: monthlyRequests.map((entry) => entry.boxTotal ?? 0),
-                      color: theme.palette.secondary.main,
-                      curve: "monotoneX",
-                    },
-                    {
-                      id: "pallets",
-                      label: "Pallets",
-                      data: monthlyRequests.map(
-                        (entry) => entry.palletTotal ?? 0
-                      ),
-                      color: theme.palette.info.main,
-                      curve: "monotoneX",
-                    },
-                  ]}
-                  xAxis={[
-                    {
-                      scaleType: "band",
-                      data: monthlyRequests.map((entry) => entry.month),
-                    },
-                  ]}
-                  margin={{ top: 40, left: 60, right: 20, bottom: 40 }}
-                  slotProps={{
-                    legend: {
-                      direction: "row",
-                      position: { vertical: "top", horizontal: "right" },
-                    },
-                  }}
-                />
-                {showMonthlyTable && (
-                  <>
-                    <Divider />
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 600 }}>Month</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Requests
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Boxes
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Pallets
-                          </TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {monthlyRequests.map((entry) => (
-                          <TableRow key={entry.month} hover>
-                            <TableCell>{entry.month}</TableCell>
-                            <TableCell align="right">
-                              {entry.requestCount}
-                            </TableCell>
-                            <TableCell align="right">{entry.boxTotal}</TableCell>
-                            <TableCell align="right">{entry.palletTotal}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </>
-                )}
-              </Stack>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                No historical data available yet. New submissions will populate
-                this view automatically.
-              </Typography>
             )}
           </SectionCard>
 
@@ -795,7 +700,9 @@ export default function AdminDashboard() {
                     {
                       id: "boxes",
                       label: "Boxes",
-                      data: topArticleGroups.map((entry) => entry.boxTotal ?? 0),
+                      data: topArticleGroups.map(
+                        (entry) => entry.boxTotal ?? 0
+                      ),
                       color: theme.palette.primary.main,
                     },
                     {
@@ -847,9 +754,7 @@ export default function AdminDashboard() {
                           {entry.approvedCount}
                         </TableCell>
                         <TableCell align="right">{entry.boxTotal}</TableCell>
-                        <TableCell align="right">
-                          {entry.palletTotal}
-                        </TableCell>
+                        <TableCell align="right">{entry.palletTotal}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -913,7 +818,8 @@ export default function AdminDashboard() {
                         p: { xs: 2.5, md: 3 },
                         borderRadius: 3,
                         border: (theme) => `1px solid ${theme.palette.divider}`,
-                        backgroundColor: (theme) => theme.palette.background.paper,
+                        backgroundColor: (theme) =>
+                          theme.palette.background.paper,
                       }}
                     >
                       <Stack spacing={1.5}>
@@ -927,7 +833,10 @@ export default function AdminDashboard() {
                               {group.importer ?? "Unknown importer"}
                             </Typography>
                             {group.requester && (
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
                                 Requested by {group.requester}
                               </Typography>
                             )}
@@ -943,15 +852,23 @@ export default function AdminDashboard() {
                         <Grid container spacing={2} columns={12}>
                           <Grid item xs={12} sm={4}>
                             <Stack spacing={0.25}>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
                                 Arrival
                               </Typography>
-                              <Typography variant="body1">{arrivalLabel}</Typography>
+                              <Typography variant="body1">
+                                {arrivalLabel}
+                              </Typography>
                             </Stack>
                           </Grid>
                           <Grid item xs={12} sm={4}>
                             <Stack spacing={0.25}>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
                                 Request date
                               </Typography>
                               <Typography variant="body1">
@@ -961,11 +878,18 @@ export default function AdminDashboard() {
                           </Grid>
                           <Grid item xs={12} sm={4}>
                             <Stack spacing={0.25}>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
                                 Boxes / pallets
                               </Typography>
                               <Typography variant="body1">
-                                {`${formatQuantity(group.totalBoxes)} boxes · ${formatQuantity(group.totalPallets)} pallets`}
+                                {`${formatQuantity(
+                                  group.totalBoxes
+                                )} boxes · ${formatQuantity(
+                                  group.totalPallets
+                                )} pallets`}
                               </Typography>
                             </Stack>
                           </Grid>
@@ -982,9 +906,11 @@ export default function AdminDashboard() {
                     </Box>
                   );
                 })}
-                {filteredApprovedGroups.length > displayedApprovedGroups.length && (
+                {filteredApprovedGroups.length >
+                  displayedApprovedGroups.length && (
                   <Typography variant="caption" color="text.secondary">
-                    Showing {displayedApprovedGroups.length} of {filteredApprovedGroups.length} matching groups.
+                    Showing {displayedApprovedGroups.length} of{" "}
+                    {filteredApprovedGroups.length} matching groups.
                   </Typography>
                 )}
               </Stack>
