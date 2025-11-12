@@ -6,6 +6,7 @@ import {
   Chip,
   Collapse,
   Container,
+  Divider,
   Grid,
   Paper,
   Stack,
@@ -18,13 +19,17 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
+import AddCircleRoundedIcon from "@mui/icons-material/AddCircleRounded";
+import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
+import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
+import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
-import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
+import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import API from "../api";
 import formatArticleCode, { formatArticleLabel } from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
-import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 import NotificationCenter from "../components/NotificationCenter";
@@ -467,7 +472,17 @@ export default function RequesterDashboard() {
   }
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: (theme) =>
+          `linear-gradient(180deg, ${alpha(theme.palette.primary.light, 0.12)} 0%, ${
+            theme.palette.background.default
+          } 40%, ${theme.palette.background.paper} 100%)`,
+      }}
+    >
       <PageHero
         title="Stock Menagment"
         subtitle=""
@@ -480,18 +495,86 @@ export default function RequesterDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <SectionCard title="" description="">
-            <Stack spacing={2}>
+          <SectionCard
+            title="Notifications"
+            description="Stay in sync with confirmations, comments and changes from the warehouse team."
+            action={
+              <Button
+                type="button"
+                variant="contained"
+                color="secondary"
+                size="small"
+                startIcon={<AutorenewRoundedIcon />}
+                onClick={() => notificationCenterRef.current?.reload()}
+                disabled={notificationsLoading}
+              >
+                {notificationsLoading ? "Refreshing..." : "Refresh feed"}
+              </Button>
+            }
+            secondaryAction={
+              <Chip
+                label={
+                  notificationsLoading
+                    ? "Loading notifications"
+                    : unreadNotifications > 0
+                    ? `${unreadNotifications} unread`
+                    : "All caught up"
+                }
+                color={unreadNotifications > 0 ? "warning" : "success"}
+                variant="outlined"
+              />
+            }
+            sx={{
+              background: (theme) =>
+                `linear-gradient(135deg, ${alpha(
+                  theme.palette.success.light,
+                  0.1
+                )} 0%, ${alpha(theme.palette.success.main, 0.05)} 100%)`,
+            }}
+          >
+            <Stack spacing={2.5}>
+              <Alert
+                icon={<NotificationsActiveRoundedIcon fontSize="inherit" />}
+                severity={unreadNotifications > 0 ? "info" : "success"}
+                variant="outlined"
+                sx={{
+                  borderRadius: 3,
+                  backgroundColor: (theme) =>
+                    alpha(
+                      unreadNotifications > 0
+                        ? theme.palette.info.light
+                        : theme.palette.success.light,
+                      0.08
+                    ),
+                }}
+              >
+                {unreadNotifications > 0
+                  ? `You have ${unreadNotifications} unread notification${
+                      unreadNotifications === 1 ? "" : "s"
+                    }.`
+                  : "You're up to date with the latest changes."}
+              </Alert>
               <NotificationPermissionBanner
                 onEnabled={() => notificationCenterRef.current?.reload()}
               />
-              <NotificationCenter
-                ref={notificationCenterRef}
-                onUnreadCountChange={setUnreadNotifications}
-                onLoadingChange={setNotificationsLoading}
-                description=""
-                emptyMessage="You're up to date with the latest changes."
-              />
+              <Paper
+                elevation={0}
+                variant="outlined"
+                sx={{
+                  borderRadius: 3,
+                  p: { xs: 2, md: 3 },
+                  backgroundColor: (theme) =>
+                    alpha(theme.palette.background.default, 0.75),
+                }}
+              >
+                <NotificationCenter
+                  ref={notificationCenterRef}
+                  onUnreadCountChange={setUnreadNotifications}
+                  onLoadingChange={setNotificationsLoading}
+                  description=""
+                  emptyMessage="You're up to date with the latest changes."
+                />
+              </Paper>
             </Stack>
           </SectionCard>
 
@@ -505,55 +588,65 @@ export default function RequesterDashboard() {
               )}
 
               <Box component="form" onSubmit={handleSubmit} noValidate>
-                <Stack spacing={3}>
-                  <TextField
-                    label="Data Krijimit"
-                    type="date"
-                    value={currentDate}
-                    disabled
-                    InputLabelProps={{ shrink: true }}
-                    helperText=""
-                    required
-                    fullWidth
-                  />
-                  <TextField
-                    label="Furnitori"
-                    value={importer}
-                    onChange={(event) => setImporter(event.target.value)}
-                    placeholder="Furnitori i importit"
-                    required
-                    fullWidth
-                  />
-                  <TextField
-                    label="Data Arritjes"
-                    type="date"
-                    value={arrivalDate}
-                    onChange={(event) => setArrivalDate(event.target.value)}
-                    InputLabelProps={{ shrink: true }}
-                    helperText="Data e parashikuar e arritjes ne depo"
-                    required
-                    fullWidth
-                  />
-                  <Stack spacing={2}>
-                    <Typography variant="subtitle1">
-                      Artikujt e porosise
-                    </Typography>
+                <Stack spacing={4}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        label="Data Krijimit"
+                        type="date"
+                        value={currentDate}
+                        disabled
+                        InputLabelProps={{ shrink: true }}
+                        helperText="Gjenerohet automatikisht"
+                        required
+                        fullWidth
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        label="Furnitori"
+                        value={importer}
+                        onChange={(event) => setImporter(event.target.value)}
+                        placeholder="Furnitori i importit"
+                        helperText="Emri i kompanise qe po furnizon mallin"
+                        required
+                        fullWidth
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        label="Data Arritjes"
+                        type="date"
+                        value={arrivalDate}
+                        onChange={(event) => setArrivalDate(event.target.value)}
+                        InputLabelProps={{ shrink: true }}
+                        helperText="Data e parashikuar e arritjes ne depo"
+                        required
+                        fullWidth
+                      />
+                    </Grid>
+                  </Grid>
+
+                  <Divider textAlign="left">Artikujt e porosise</Divider>
+
+                  <Stack spacing={2.5}>
                     {items.map((item, index) => (
-                      <Stack
+                      <Paper
                         key={`order-item-${index}`}
-                        spacing={2}
+                        variant="outlined"
                         sx={{
-                          p: 2,
-                          borderRadius: 2,
-                          border: "1px solid",
-                          borderColor: "divider",
-                          backgroundColor: "background.paper",
+                          p: { xs: 2, md: 3 },
+                          borderRadius: 3,
+                          backgroundColor: (theme) =>
+                            alpha(theme.palette.primary.light, 0.02),
                         }}
                       >
                         <Stack
-                          direction="row"
-                          alignItems="center"
+                          direction={{ xs: "column", sm: "row" }}
+                          spacing={1}
+                          alignItems={{ xs: "flex-start", sm: "center" }}
                           justifyContent="space-between"
+                          sx={{ mb: 2 }}
                         >
                           <Typography variant="subtitle2">
                             Artikulli {index + 1}
@@ -562,123 +655,163 @@ export default function RequesterDashboard() {
                             <Button
                               type="button"
                               color="error"
-                              onClick={() => handleRemoveItem(index)}
                               size="small"
+                              startIcon={<DeleteOutlineRoundedIcon />}
+                              onClick={() => handleRemoveItem(index)}
                             >
-                              Remove
+                              Hiq artikullin
                             </Button>
                           )}
                         </Stack>
-                        <TextField
-                          label="Sifra Artikulli"
-                          value={item.article}
-                          onChange={(event) =>
-                            handleItemChange(
-                              index,
-                              "article",
-                              event.target.value
-                            )
-                          }
-                          placeholder=""
-                          helperText="Artikulli qe ka me pak se 6 karaktere automatikisht i shtohen zero para tij"
-                          required
-                          fullWidth
-                        />
-                        <TextField
-                          label="Sasia - Pako"
-                          type="number"
-                          value={item.boxCount}
-                          onChange={(event) =>
-                            handleItemChange(
-                              index,
-                              "boxCount",
-                              event.target.value
-                            )
-                          }
-                          inputProps={{ min: 1 }}
-                          helperText="Kalkulimi behet ne baze te sasis se pakove automatikisht"
-                          required
-                          fullWidth
-                        />
-                      </Stack>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} md={6}>
+                            <TextField
+                              label="Sifra Artikulli"
+                              value={item.article}
+                              onChange={(event) =>
+                                handleItemChange(
+                                  index,
+                                  "article",
+                                  event.target.value
+                                )
+                              }
+                              helperText="Artikujt me me pak se 6 karaktere marrin zero automatikisht"
+                              required
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid item xs={12} md={6}>
+                            <TextField
+                              label="Sasia - Pako"
+                              type="number"
+                              value={item.boxCount}
+                              onChange={(event) =>
+                                handleItemChange(
+                                  index,
+                                  "boxCount",
+                                  event.target.value
+                                )
+                              }
+                              inputProps={{ min: 1 }}
+                              helperText="Vendos sasine ne pako per te llogaritur paletat"
+                              required
+                              fullWidth
+                            />
+                          </Grid>
+                        </Grid>
+                      </Paper>
                     ))}
                     <Button
                       type="button"
                       variant="outlined"
+                      startIcon={<AddCircleRoundedIcon />}
                       onClick={handleAddItem}
-                      sx={{ alignSelf: "flex-start" }}
+                      sx={{ alignSelf: { xs: "stretch", sm: "flex-start" } }}
                     >
                       Shto artikull tjeter
                     </Button>
                   </Stack>
-                  <Stack spacing={1}>
-                    <Typography variant="subtitle1">
-                      Import nga Excel (optional)
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Vendosni exelin me te dhenat e artikujve per import
-                      automatik, nese zgjidhni kete opsion, fushat e artikujve
-                      me lart do te injorohen!
-                    </Typography>
-                    <Stack
-                      direction={{ xs: "column", sm: "row" }}
-                      spacing={2}
-                      alignItems={{ sm: "center" }}
-                    >
-                      <Button component="label" variant="outlined">
-                        Select Excel files
-                        <input
-                          type="file"
-                          hidden
-                          multiple
-                          accept=".xlsx,.xls"
-                          ref={excelInputRef}
-                          onChange={handleExcelChange}
-                        />
-                      </Button>
-                      {excelFiles.length > 0 && (
+
+                  <Divider textAlign="left">Import nga Excel (opsionale)</Divider>
+
+                  <Paper
+                    variant="outlined"
+                    sx={{
+                      p: { xs: 2, md: 3 },
+                      borderRadius: 3,
+                      backgroundColor: (theme) =>
+                        alpha(theme.palette.primary.light, 0.04),
+                    }}
+                  >
+                    <Stack spacing={2}>
+                      <Typography variant="body2" color="text.secondary">
+                        Vendosni skedarin Excel per te importuar artikujt
+                        automatikisht. Nese ngarkoni skedar, artikujt manuale
+                        sipër do te injorohen.
+                      </Typography>
+                      <Stack
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={2}
+                        alignItems={{ sm: "center" }}
+                      >
                         <Button
-                          type="button"
-                          color="secondary"
-                          onClick={handleExcelClear}
+                          component="label"
+                          variant="outlined"
+                          startIcon={<CloudUploadRoundedIcon />}
                         >
-                          Anulo Exelin
+                          Zgjidh Excel
+                          <input
+                            type="file"
+                            hidden
+                            multiple
+                            accept=".xlsx,.xls"
+                            ref={excelInputRef}
+                            onChange={handleExcelChange}
+                          />
                         </Button>
+                        {excelFiles.length > 0 && (
+                          <Button
+                            type="button"
+                            color="secondary"
+                            startIcon={<DeleteOutlineRoundedIcon />}
+                            onClick={handleExcelClear}
+                          >
+                            Hiq skedaret
+                          </Button>
+                        )}
+                      </Stack>
+                      {excelFiles.length > 0 && (
+                        <>
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            useFlexGap
+                            flexWrap="wrap"
+                          >
+                            {excelFiles.map((file, index) => (
+                              <Chip
+                                key={`${file.name}-${index}`}
+                                label={file.name}
+                                variant="outlined"
+                                size="small"
+                              />
+                            ))}
+                          </Stack>
+                          <Typography variant="caption" color="text.secondary">
+                            {`Manual entries are ignored while ${
+                              excelFiles.length
+                            } file${
+                              excelFiles.length === 1 ? "" : "s"
+                            } are attached.`}
+                          </Typography>
+                        </>
                       )}
                     </Stack>
-                    {excelFiles.length > 0 && (
-                      <Stack spacing={0.5}>
-                        {excelFiles.map((file, index) => (
-                          <Typography
-                            key={`${file.name}-${index}`}
-                            variant="body2"
-                          >
-                            {file.name}
-                          </Typography>
-                        ))}
-                        <Typography variant="caption" color="text.secondary">
-                          {`Manual entries are ignored while ${
-                            excelFiles.length
-                          } file${
-                            excelFiles.length === 1 ? "" : "s"
-                          } are attached.`}
-                        </Typography>
-                      </Stack>
-                    )}
-                  </Stack>
+                  </Paper>
+
                   <TextField
                     label="Vendos koment"
                     value={comment}
                     onChange={(event) => setComment(event.target.value)}
                     placeholder="Shto nje koment te perbashket per porosine"
-                    helperText="Vendos nje koment te perbashket per porosine"
+                    helperText="Opsionale — p.sh. kush merr kontaktin kur arrin"
                     multiline
                     minRows={3}
                     fullWidth
                   />
 
-                  <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-                    <Button type="submit" variant="contained" size="large">
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      size="large"
+                      endIcon={<SendRoundedIcon />}
+                    >
                       Submit order
                     </Button>
                   </Box>

@@ -10,10 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   Grid,
-  List,
-  ListItemButton,
   Paper,
   Stack,
   TextField,
@@ -21,8 +18,11 @@ import {
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
+import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
+import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
+import ViewInArRoundedIcon from "@mui/icons-material/ViewInArRounded";
 import API from "../api";
 import RequestGroupCard from "../components/RequestGroupCard";
 import CalendarOverview from "../components/CalendarOverview";
@@ -31,6 +31,20 @@ import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
 import NotificationCenter from "../components/NotificationCenter";
+
+const formatNumeric = (value, fractionDigits = 0) => {
+  if (value === null || value === undefined) {
+    return "0";
+  }
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "0";
+  }
+  return numericValue.toLocaleString(undefined, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+};
 
 export default function ConfirmerDashboard() {
   const [requests, setRequests] = useState([]);
@@ -44,6 +58,7 @@ export default function ConfirmerDashboard() {
   const notificationCenterRef = useRef(null);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -51,6 +66,7 @@ export default function ConfirmerDashboard() {
     try {
       const res = await API.get("/imports");
       setRequests(res.data);
+      setLastSyncedAt(new Date());
     } catch (error) {
       setFeedback({
         severity: "error",
@@ -186,6 +202,47 @@ export default function ConfirmerDashboard() {
     });
   }, [requests]);
 
+  const requestMetrics = useMemo(() => {
+    if (requests.length === 0) {
+      return {
+        groupCount: 0,
+        articleCount: 0,
+        totalBoxes: 0,
+        totalPallets: 0,
+      };
+    }
+    const totals = requests.reduce(
+      (acc, request) => {
+        const boxes = Number(request.BoxCount);
+        if (Number.isFinite(boxes)) {
+          acc.totalBoxes += boxes;
+        }
+        const pallets = Number(request.PalletCount);
+        if (Number.isFinite(pallets)) {
+          acc.totalPallets += pallets;
+        }
+        return acc;
+      },
+      { totalBoxes: 0, totalPallets: 0 }
+    );
+    return {
+      groupCount: groupedRequests.length,
+      articleCount: requests.length,
+      totalBoxes: totals.totalBoxes,
+      totalPallets: totals.totalPallets,
+    };
+  }, [groupedRequests, requests]);
+
+  const lastSyncLabel = useMemo(() => {
+    if (!lastSyncedAt) {
+      return "Not synced yet";
+    }
+    return `Updated ${lastSyncedAt.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  }, [lastSyncedAt]);
+
   const handleGroupDecision = async (group, status) => {
     setFeedback(null);
     try {
@@ -276,7 +333,6 @@ export default function ConfirmerDashboard() {
     window.location.reload();
   };
 
-  const pendingCount = groupedRequests.length;
   const awaitingSchedule = useMemo(() => {
     if (groupedRequests.length === 0) return 0;
     return groupedRequests.filter((group) => {
@@ -291,7 +347,17 @@ export default function ConfirmerDashboard() {
   }, [groupedRequests]);
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: (theme) =>
+          `linear-gradient(180deg, ${alpha(theme.palette.primary.light, 0.12)} 0%, ${
+            theme.palette.background.default
+          } 35%, ${theme.palette.background.paper} 100%)`,
+      }}
+    >
       <PageHero
         title="VIVA Fresh Imports Tracker"
         subtitle=""
@@ -304,72 +370,210 @@ export default function ConfirmerDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <SectionCard title="" description="">
-            <Stack spacing={2}>
+          <SectionCard
+            title="Notifications"
+            description="Stay aligned with approvals, comments and scheduling updates."
+            action={
+              <Button
+                type="button"
+                variant="contained"
+                color="secondary"
+                size="small"
+                startIcon={<AutorenewRoundedIcon />}
+                onClick={() => notificationCenterRef.current?.reload()}
+                disabled={notificationsLoading}
+              >
+                {notificationsLoading ? "Refreshing..." : "Refresh feed"}
+              </Button>
+            }
+            secondaryAction={
+              <Chip
+                label={
+                  notificationsLoading
+                    ? "Loading notifications"
+                    : unreadNotifications > 0
+                    ? `${unreadNotifications} unread`
+                    : "All caught up"
+                }
+                color={unreadNotifications > 0 ? "warning" : "success"}
+                variant="outlined"
+              />
+            }
+            sx={{
+              background: (theme) =>
+                `linear-gradient(135deg, ${alpha(
+                  theme.palette.info.light,
+                  0.08
+                )} 0%, ${alpha(theme.palette.info.main, 0.05)} 100%)`,
+            }}
+          >
+            <Stack spacing={2.5}>
+              <Alert
+                icon={<NotificationsActiveRoundedIcon fontSize="inherit" />}
+                severity={unreadNotifications > 0 ? "info" : "success"}
+                variant="outlined"
+                sx={{
+                  borderRadius: 3,
+                  backgroundColor: (theme) =>
+                    alpha(
+                      unreadNotifications > 0
+                        ? theme.palette.info.light
+                        : theme.palette.success.light,
+                      0.08
+                    ),
+                }}
+              >
+                {unreadNotifications > 0
+                  ? `You have ${unreadNotifications} unread notification${
+                      unreadNotifications === 1 ? "" : "s"
+                    }.`
+                  : "You're up to date with the latest changes."}
+              </Alert>
               <NotificationPermissionBanner
                 onEnabled={() => notificationCenterRef.current?.reload()}
               />
-              <NotificationCenter
-                ref={notificationCenterRef}
-                onUnreadCountChange={setUnreadNotifications}
-                onLoadingChange={setNotificationsLoading}
-                description=""
-                emptyMessage="You're caught up with the latest updates."
-              />
+              <Paper
+                elevation={0}
+                variant="outlined"
+                sx={{
+                  borderRadius: 3,
+                  p: { xs: 2, md: 3 },
+                  backgroundColor: (theme) =>
+                    alpha(theme.palette.background.default, 0.75),
+                }}
+              >
+                <NotificationCenter
+                  ref={notificationCenterRef}
+                  onUnreadCountChange={setUnreadNotifications}
+                  onLoadingChange={setNotificationsLoading}
+                  description=""
+                  emptyMessage="You're caught up with the latest updates."
+                />
+              </Paper>
             </Stack>
           </SectionCard>
-          {feedback && (
-            <Alert severity={feedback.severity}>{feedback.message}</Alert>
-          )}
 
-          {loading ? (
-            <Paper
-              elevation={0}
-              sx={{
-                p: 6,
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                backgroundColor: "transparent",
-              }}
-            >
-              <CircularProgress color="primary" />
-            </Paper>
-          ) : groupedRequests.length === 0 ? (
-            <Paper
-              elevation={4}
-              sx={{ p: { xs: 4, md: 6 }, textAlign: "center" }}
-            >
-              <Typography variant="h6" gutterBottom>
-                You're all caught up
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                There are no pending request bills right now. You'll be notified
-                when new submissions arrive.
-              </Typography>
-            </Paper>
-          ) : (
+          {requestMetrics.articleCount > 0 && (
             <Grid container spacing={3}>
-              {groupedRequests.map((group) => (
-                <Grid
-                  item
-                  xs={12}
-                  key={`${group.reference}-${group.items.length}`}
-                >
-                  <RequestGroupCard
-                    group={group}
-                    onApprove={(selectedGroup) =>
-                      handleGroupDecision(selectedGroup, "approved")
-                    }
-                    onReject={(selectedGroup) =>
-                      handleGroupDecision(selectedGroup, "rejected")
-                    }
-                    onProposeDate={handleOpenProposal}
-                  />
-                </Grid>
-              ))}
+              <Grid item xs={12} sm={6} md={3}>
+                <StatCard
+                  icon={<AssignmentTurnedInRoundedIcon />}
+                  label="Pending groups"
+                  value={formatNumeric(requestMetrics.groupCount)}
+                  trend={
+                    awaitingSchedule > 0
+                      ? `${awaitingSchedule} awaiting schedule`
+                      : "All have proposed dates"
+                  }
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <StatCard
+                  icon={<ScheduleRoundedIcon />}
+                  label="Articles awaiting"
+                  value={formatNumeric(requestMetrics.articleCount)}
+                  trend="Line items queued for review"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <StatCard
+                  icon={<Inventory2RoundedIcon />}
+                  label="Boxes queued"
+                  value={formatNumeric(requestMetrics.totalBoxes)}
+                  trend="Across all pending groups"
+                  color="secondary"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <StatCard
+                  icon={<ViewInArRoundedIcon />}
+                  label="Projected pallets"
+                  value={formatNumeric(requestMetrics.totalPallets)}
+                  trend="Estimated pallet usage"
+                  color="success"
+                />
+              </Grid>
             </Grid>
           )}
+
+          <SectionCard
+            title="Pending confirmations"
+            description="Review grouped submissions and approve, reject, or propose new arrival dates."
+            action={
+              <Button
+                type="button"
+                variant="contained"
+                startIcon={<AutorenewRoundedIcon />}
+                onClick={loadRequests}
+                disabled={loading}
+              >
+                {loading ? "Refreshing..." : "Refresh list"}
+              </Button>
+            }
+            secondaryAction={
+              <Chip
+                label={
+                  requestMetrics.groupCount > 0
+                    ? `${requestMetrics.groupCount} group${
+                        requestMetrics.groupCount === 1 ? "" : "s"
+                      } pending`
+                    : "No pending groups"
+                }
+                color={requestMetrics.groupCount > 0 ? "warning" : "success"}
+                variant="outlined"
+              />
+            }
+          >
+            <Stack spacing={3}>
+              <Typography variant="body2" color="text.secondary">
+                {lastSyncLabel}
+              </Typography>
+              {feedback && (
+                <Alert severity={feedback.severity}>{feedback.message}</Alert>
+              )}
+              {loading ? (
+                <Box
+                  sx={{
+                    py: 6,
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  <CircularProgress color="primary" />
+                </Box>
+              ) : groupedRequests.length === 0 ? (
+                <Stack spacing={1} textAlign="center">
+                  <Typography variant="h6">You're all caught up</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    There are no pending request groups right now. New
+                    submissions will appear here automatically.
+                  </Typography>
+                </Stack>
+              ) : (
+                <Grid container spacing={3}>
+                  {groupedRequests.map((group) => (
+                    <Grid
+                      item
+                      xs={12}
+                      key={`${group.reference}-${group.items.length}`}
+                    >
+                      <RequestGroupCard
+                        group={group}
+                        onApprove={(selectedGroup) =>
+                          handleGroupDecision(selectedGroup, "approved")
+                        }
+                        onReject={(selectedGroup) =>
+                          handleGroupDecision(selectedGroup, "rejected")
+                        }
+                        onProposeDate={handleOpenProposal}
+                      />
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+            </Stack>
+          </SectionCard>
 
           <CalendarOverview title="Calendar overview" description="" />
         </Stack>

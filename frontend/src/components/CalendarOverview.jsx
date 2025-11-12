@@ -51,6 +51,8 @@ const formatPercent = (value, fractionDigits = 1) => {
   })}%`;
 };
 
+const LIST_PREVIEW_LIMIT = 6;
+
 const CalendarOverview = ({
   title = "Confirmed arrivals overview",
   description,
@@ -62,6 +64,8 @@ const CalendarOverview = ({
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState(null);
   const [expandedKeys, setExpandedKeys] = useState({});
+  const [showAllConfirmed, setShowAllConfirmed] = useState(false);
+  const [showAllWms, setShowAllWms] = useState(false);
   const loadRequests = useCallback(async () => {
     setLoading(true);
     setFeedback(null);
@@ -91,6 +95,10 @@ const CalendarOverview = ({
       clearInterval(refreshHandle);
     };
   }, [loadRequests]);
+  useEffect(() => {
+    setShowAllConfirmed(false);
+    setShowAllWms(false);
+  }, [selectedDate]);
   const toggleExpanded = useCallback((key) => {
     setExpandedKeys((previous) => ({
       ...previous,
@@ -147,6 +155,20 @@ const CalendarOverview = ({
   const hasWmsArrivals = eventsForSelectedDate.wms.length > 0;
   const hasConfirmedArrivals = eventsForSelectedDate.confirmed.length > 0;
   const hasEventsForSelectedDate = hasWmsArrivals || hasConfirmedArrivals;
+  const confirmedVisible = useMemo(() => {
+    const items = eventsForSelectedDate.confirmed ?? [];
+    if (showAllConfirmed || items.length <= LIST_PREVIEW_LIMIT) {
+      return items;
+    }
+    return items.slice(0, LIST_PREVIEW_LIMIT);
+  }, [eventsForSelectedDate, showAllConfirmed]);
+  const wmsVisible = useMemo(() => {
+    const items = eventsForSelectedDate.wms ?? [];
+    if (showAllWms || items.length <= LIST_PREVIEW_LIMIT) {
+      return items;
+    }
+    return items.slice(0, LIST_PREVIEW_LIMIT);
+  }, [eventsForSelectedDate, showAllWms]);
   const formattedSelectedDate = useMemo(() => {
     if (
       !(selectedDate instanceof Date) ||
@@ -285,6 +307,9 @@ const CalendarOverview = ({
   const renderDay = (dayProps) => {
     const { day, selectedDay, outsideCurrentMonth } = dayProps;
     if (!(day instanceof Date) || Number.isNaN(day.getTime())) {
+      return <PickersDay {...dayProps} />;
+    }
+    if (outsideCurrentMonth) {
       return <PickersDay {...dayProps} />;
     }
     const key = formatKey(day);
@@ -543,10 +568,10 @@ const CalendarOverview = ({
               Confirmed import requests (
               {eventsForSelectedDate.confirmed.length})
             </Typography>
-            <List
-              dense
-              disablePadding
-              sx={{
+                  <List
+                    dense
+                    disablePadding
+                    sx={{
                 display: "grid",
                 gap: 1.5,
                 gridTemplateColumns: {
@@ -555,7 +580,7 @@ const CalendarOverview = ({
                 alignItems: "stretch",
               }}
             >
-              {eventsForSelectedDate.confirmed.map((request, index) => {
+              {confirmedVisible.map((request, index) => {
                 const requestDate = (() => {
                   if (!request.RequestDate) return "N/A";
                   const parsed = new Date(request.RequestDate);
@@ -701,6 +726,20 @@ const CalendarOverview = ({
                 );
               })}
             </List>
+            {eventsForSelectedDate.confirmed.length > LIST_PREVIEW_LIMIT && (
+              <Box sx={{ mt: 1 }}>
+                <Button
+                  type="button"
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setShowAllConfirmed((previous) => !previous)}
+                >
+                  {showAllConfirmed
+                    ? "Show fewer imports"
+                    : `View all ${eventsForSelectedDate.confirmed.length} imports`}
+                </Button>
+              </Box>
+            )}
           </Box>
         )}
         {feedback && (
@@ -717,21 +756,55 @@ const CalendarOverview = ({
             alignItems="stretch"
             sx={{ flexWrap: { xs: "wrap", md: "nowrap" }, rowGap: 4 }}
           >
-            <Box sx={{ flexShrink: 0, minWidth: { xs: "100%", md: 320 } }}>
+            <Box
+              component={Paper}
+              elevation={3}
+              sx={{
+                flexShrink: 0,
+                width: { xs: "100%", md: 420 },
+                maxWidth: { xs: "100%", lg: 520 },
+                alignSelf: "stretch",
+                borderRadius: 4,
+                p: { xs: 2.5, sm: 3 },
+                background: (theme) =>
+                  `linear-gradient(135deg, ${alpha(
+                    theme.palette.primary.main,
+                    0.08
+                  )}, ${alpha(theme.palette.primary.light, 0.05)})`,
+                boxShadow: (theme) =>
+                  `0 20px 40px ${alpha(theme.palette.primary.main, 0.12)}`,
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={1.5} mb={2}>
+                <CalendarMonthIcon color="primary" fontSize="medium" />
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Arrival calendar
+                </Typography>
+              </Stack>
               <LocalizationProvider dateAdapter={AdapterDateFns}>
                 <DateCalendar
                   value={selectedDate}
                   onChange={(value) => value && setSelectedDate(value)}
                   slots={{ day: renderDay }}
                   sx={{
-                    borderRadius: 4,
-                    p: 2,
+                    borderRadius: 3,
+                    p: 1,
                     width: "100%",
+                    "& .MuiPickersCalendarHeader-root": {
+                      mb: 1,
+                    },
                     "& .MuiPickersCalendarHeader-label": {
-                      fontWeight: 600,
+                      fontWeight: 700,
+                      fontSize: "1.1rem",
                     },
                     "& .MuiDayCalendar-weekDayLabel": {
-                      fontWeight: 500,
+                      fontWeight: 600,
+                    },
+                    "& .MuiPickersDay-root": {
+                      fontWeight: 600,
+                      width: 40,
+                      height: 40,
+                      fontSize: "0.95rem",
                     },
                   }}
                 />
@@ -778,7 +851,7 @@ const CalendarOverview = ({
                           alignItems: "stretch",
                         }}
                       >
-                        {eventsForSelectedDate.wms.map((order, index) => {
+                        {wmsVisible.map((order, index) => {
                           const arrivalDate = (() => {
                             if (!order.ArrivalDate) return "N/A";
                             const parsed = new Date(order.ArrivalDate);
@@ -913,6 +986,21 @@ const CalendarOverview = ({
                           );
                         })}
                       </List>
+                      {eventsForSelectedDate.wms.length > LIST_PREVIEW_LIMIT && (
+                        <Box sx={{ mt: 1 }}>
+                          <Button
+                            type="button"
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            onClick={() => setShowAllWms((previous) => !previous)}
+                          >
+                            {showAllWms
+                              ? "Show fewer WMS orders"
+                              : `View all ${eventsForSelectedDate.wms.length} WMS orders`}
+                          </Button>
+                        </Box>
+                      )}
                     </Box>
                   )}
                 </Box>

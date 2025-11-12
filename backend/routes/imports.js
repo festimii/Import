@@ -489,6 +489,7 @@ const EXCEL_FIELD_MAP = new Map([
   ["sasiapalete", "palletCount"],
   ["sasia - palete", "palletCount"],
   ["dataeplanifikuarearitjes", "plannedArrival"],
+  ["data e planifikuar e arritjes", "plannedArrival"],
   ["forma transportit", "transportMode"],
   ["formatransportit", "transportMode"],
   ["kthimi paletave", "palletReturn"],
@@ -1017,6 +1018,50 @@ const insertImportRequestItems = async ({
       const articleName =
         articleNameLookup.get(current.article) ?? fallbackArticleName;
 
+      const importerValue = trimString(
+        current.importer ?? current.Importuesi ?? importer
+      );
+      if (!importerValue) {
+        const error = new Error(
+          `Importer is required for item ${index + 1}.`
+        );
+        error.meta = {
+          itemIndex: index + 1,
+          article: current.article,
+        };
+        throw error;
+      }
+
+      const requestDateValue =
+        current.requestDateSql ??
+        current.requestDateSqlValue ??
+        requestDateSqlValue;
+      if (!requestDateValue) {
+        const error = new Error(
+          `Request date is required for item ${index + 1}.`
+        );
+        error.meta = {
+          itemIndex: index + 1,
+          article: current.article,
+        };
+        throw error;
+      }
+
+      const arrivalDateValue =
+        current.arrivalDateSql ??
+        current.arrivalDateSqlValue ??
+        arrivalDateSqlValue;
+      if (!arrivalDateValue) {
+        const error = new Error(
+          `Arrival date is required for item ${index + 1}.`
+        );
+        error.meta = {
+          itemIndex: index + 1,
+          article: current.article,
+        };
+        throw error;
+      }
+
       let calculation = current.calculation ?? null;
       if (!calculation) {
         try {
@@ -1047,9 +1092,9 @@ const insertImportRequestItems = async ({
       })();
 
       const request = new sql.Request(transaction)
-        .input("DataKerkeses", requestDateSqlValue)
-        .input("DataArritjes", arrivalDateSqlValue)
-        .input("Importuesi", importer)
+        .input("DataKerkeses", requestDateValue)
+        .input("DataArritjes", arrivalDateValue)
+        .input("Importuesi", importerValue)
         .input("Artikulli", current.article)
         .input("ArticleName", articleName)
         .input("NumriPakove", current.boxCount)
@@ -1421,8 +1466,6 @@ router.post(
 
     const sanitizedDefaultComment = sanitizeComment(req.body.comment);
     const excelItems = [];
-    const importerCandidates = new Set();
-    const arrivalCandidates = new Set();
 
     try {
       for (const file of files) {
@@ -1458,17 +1501,6 @@ router.post(
               continue;
             }
 
-            if (parsed.importerCandidate) {
-              importerCandidates.add(parsed.importerCandidate);
-            }
-
-            if (parsed.plannedArrival) {
-              const arrivalSql = toSqlDate(parsed.plannedArrival);
-              if (arrivalSql) {
-                arrivalCandidates.add(arrivalSql);
-              }
-            }
-
             excelItems.push(parsed);
           }
         }
@@ -1482,23 +1514,8 @@ router.post(
       }
 
       const importerFromBody = trimString(req.body.importer);
-      let importerValue = importerFromBody;
-
-      if (!importerValue) {
-        if (importerCandidates.size === 1) {
-          importerValue = [...importerCandidates][0];
-        }
-      }
-
-      if (!importerValue) {
-        return res.status(400).json({
-          message:
-            "Unable to determine the importer. Please fill the importer field or ensure every Excel sheet contains the same Furnitori value.",
-        });
-      }
-
       const arrivalFromBody = trimString(req.body.arrivalDate);
-      let arrivalDateSqlValue = null;
+      let arrivalDateSqlFallback = null;
 
       if (arrivalFromBody) {
         const parsed = new Date(arrivalFromBody);
@@ -1507,14 +1524,7 @@ router.post(
             .status(400)
             .json({ message: "Invalid arrival date provided." });
         }
-        arrivalDateSqlValue = parsed.toISOString().split("T")[0];
-      } else if (arrivalCandidates.size === 1) {
-        arrivalDateSqlValue = [...arrivalCandidates][0];
-      } else {
-        return res.status(400).json({
-          message:
-            "Unable to determine the arrival date. Please fill the arrival date field or ensure all Excel rows use the same planned arrival date.",
-        });
+        arrivalDateSqlFallback = parsed.toISOString().split("T")[0];
       }
 
       const requestDateValue = (() => {
@@ -1530,18 +1540,71 @@ router.post(
       const requestDateSqlValue = requestDateValue.toISOString().split("T")[0];
       const batchId = randomUUID();
 
-      const normalizedItems = excelItems.map((item) => ({
-        article: item.article,
-        boxCount: item.boxCount,
-        palletCountOverride: item.palletCountOverride,
-        comment: sanitizedDefaultComment,
-        excelMeta: item.excelMeta,
-      }));
+      const normalizedItems = [];
+      const uniqueImporters = new Set();
+      const uniqueArrivals = new Set();
+      let lastImporterValue = importerFromBody ? trimString(importerFromBody) : null;
+      let lastArrivalDateSqlValue = arrivalDateSqlFallback ?? null;
+
+      for (let index = 0; index < excelItems.length; index += 1) {
+        const item = excelItems[index];
+        const importerCandidate = trimString(item.importerCandidate);
+        if (importerCandidate) {
+          lastImporterValue = importerCandidate;
+        }
+        const importerValue = importerCandidate ?? lastImporterValue;
+
+        if (!importerValue) {
+          return res.status(400).json({
+            message: `Unable to determine the importer for row ${
+              index + 1
+            }. Please fill the importer field or ensure each Excel row has a Furnitori value.`,
+          });
+        }
+
+        const arrivalSqlFromExcel = toSqlDate(item.plannedArrival);
+        if (arrivalSqlFromExcel) {
+          lastArrivalDateSqlValue = arrivalSqlFromExcel;
+        }
+        const arrivalSqlValue =
+          arrivalSqlFromExcel ?? lastArrivalDateSqlValue ?? arrivalDateSqlFallback;
+
+        if (!arrivalSqlValue) {
+          return res.status(400).json({
+            message: `Unable to determine the arrival date for row ${
+              index + 1
+            }. Please fill the arrival date field or ensure the "Data e planifikuar e arritjes" column is filled for every row.`,
+          });
+        }
+
+        lastImporterValue = importerValue;
+        lastArrivalDateSqlValue = arrivalSqlValue;
+
+        uniqueImporters.add(importerValue);
+        uniqueArrivals.add(arrivalSqlValue);
+
+        normalizedItems.push({
+          article: item.article,
+          boxCount: item.boxCount,
+          palletCountOverride: item.palletCountOverride,
+          comment: sanitizedDefaultComment,
+          excelMeta: item.excelMeta,
+          importer: importerValue,
+          arrivalDateSql: arrivalSqlValue,
+        });
+      }
+
+      const importerSummary =
+        uniqueImporters.size === 1
+          ? [...uniqueImporters][0]
+          : importerFromBody ?? null;
+      const arrivalSummary =
+        uniqueArrivals.size === 1 ? [...uniqueArrivals][0] : null;
 
       const insertedRecords = await insertImportRequestItems({
-        importer: importerValue,
+        importer: importerFromBody ?? null,
         requestDateSqlValue,
-        arrivalDateSqlValue,
+        arrivalDateSqlValue: arrivalDateSqlFallback,
         normalizedItems,
         requesterUsername: req.user.username,
         batchId,
@@ -1561,8 +1624,10 @@ router.post(
       res.json({
         ...(hasBatchId ? { batchId } : {}),
         items: insertedRecords,
-        importer: importerValue,
-        arrivalDate: arrivalDateSqlValue,
+        importer: importerSummary,
+        arrivalDate: arrivalSummary,
+        distinctImporters: uniqueImporters.size,
+        distinctArrivalDates: uniqueArrivals.size,
         processedRows: excelItems.length,
       });
     } catch (error) {

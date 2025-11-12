@@ -8,6 +8,7 @@ import {
   Container,
   Divider,
   Grid,
+  Paper,
   Stack,
   Table,
   TableBody,
@@ -17,7 +18,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useTheme } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
 import { BarChart, LineChart } from "@mui/x-charts";
 import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
 import VerifiedUserRoundedIcon from "@mui/icons-material/VerifiedUserRounded";
@@ -26,6 +27,7 @@ import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
+import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
@@ -426,7 +428,17 @@ export default function AdminDashboard() {
   }, [importMetrics, importMetricsLoading]);
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: (theme) =>
+          `linear-gradient(180deg, ${alpha(theme.palette.primary.light, 0.12)} 0%, ${
+            theme.palette.background.default
+          } 40%, ${theme.palette.background.paper} 100%)`,
+      }}
+    >
       <PageHero
         title="Admin workspace"
         subtitle="Track approved import requests, anticipate arrivals and curate role-based access for every collaborator."
@@ -461,19 +473,83 @@ export default function AdminDashboard() {
           <SectionCard
             title="Live notifications"
             description="Receive instant alerts when approvers update requests or propose new arrival dates."
-            variant="minimal"
+            action={
+              <Button
+                type="button"
+                variant="contained"
+                color="secondary"
+                size="small"
+                startIcon={<AutorenewRoundedIcon />}
+                onClick={() => notificationCenterRef.current?.reload()}
+                disabled={notificationsLoading}
+              >
+                {notificationsLoading ? "Refreshing..." : "Refresh feed"}
+              </Button>
+            }
+            secondaryAction={
+              <Chip
+                label={
+                  notificationsLoading
+                    ? "Loading notifications"
+                    : unreadNotifications > 0
+                    ? `${unreadNotifications} unread`
+                    : "All caught up"
+                }
+                color={unreadNotifications > 0 ? "warning" : "success"}
+                variant="outlined"
+              />
+            }
+            sx={{
+              background: (theme) =>
+                `linear-gradient(135deg, ${alpha(
+                  theme.palette.secondary.light,
+                  0.08
+                )} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 100%)`,
+            }}
           >
-            <Stack spacing={2}>
+            <Stack spacing={2.5}>
+              <Alert
+                icon={<NotificationsActiveRoundedIcon fontSize="inherit" />}
+                severity={unreadNotifications > 0 ? "info" : "success"}
+                variant="outlined"
+                sx={{
+                  borderRadius: 3,
+                  backgroundColor: (theme) =>
+                    alpha(
+                      unreadNotifications > 0
+                        ? theme.palette.info.light
+                        : theme.palette.success.light,
+                      0.08
+                    ),
+                }}
+              >
+                {unreadNotifications > 0
+                  ? `You have ${unreadNotifications} unread notification${
+                      unreadNotifications === 1 ? "" : "s"
+                    }.`
+                  : "You're up to date with the latest changes."}
+              </Alert>
               <NotificationPermissionBanner
                 onEnabled={() => notificationCenterRef.current?.reload()}
               />
-              <NotificationCenter
-                ref={notificationCenterRef}
-                onUnreadCountChange={setUnreadNotifications}
-                onLoadingChange={setNotificationsLoading}
-                description="Receive instant alerts when approvers update requests or propose new arrival dates."
-                emptyMessage="No unread updates at the moment."
-              />
+              <Paper
+                elevation={0}
+                variant="outlined"
+                sx={{
+                  borderRadius: 3,
+                  p: { xs: 2, md: 3 },
+                  backgroundColor: (theme) =>
+                    alpha(theme.palette.background.default, 0.75),
+                }}
+              >
+                <NotificationCenter
+                  ref={notificationCenterRef}
+                  onUnreadCountChange={setUnreadNotifications}
+                  onLoadingChange={setNotificationsLoading}
+                  description="Receive instant alerts when approvers update requests or propose new arrival dates."
+                  emptyMessage="No unread updates at the moment."
+                />
+              </Paper>
             </Stack>
           </SectionCard>
           <SectionCard
@@ -484,7 +560,6 @@ export default function AdminDashboard() {
                 Manage users
               </Button>
             }
-            variant="minimal"
           >
             {userFeedback && (
               <Alert severity={userFeedback.severity}>{userFeedback.message}</Alert>
@@ -522,7 +597,6 @@ export default function AdminDashboard() {
           <SectionCard
             title="Import operations snapshot"
             description="Track request volume, approvals and near-term arrivals at a glance."
-            variant="minimal"
           >
             {importMetricsFeedback && (
               <Alert severity={importMetricsFeedback.severity}>
@@ -595,7 +669,6 @@ export default function AdminDashboard() {
           <SectionCard
             title="Monthly request trend"
             description="Compare intake volume, box totals and pallet totals month over month."
-            variant="minimal"
             action={
               monthlyRequests.length > 0 && (
                 <Button
@@ -701,7 +774,6 @@ export default function AdminDashboard() {
           <SectionCard
             title="Top articles by volume"
             description="Understand which articles dominate requests to align warehouse capacity and approvals."
-            variant="minimal"
           >
             {importMetricsLoading ? (
               <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
@@ -812,7 +884,6 @@ export default function AdminDashboard() {
                 </Button>
               ) : null
             }
-            variant="minimal"
           >
             {approvedFeedback && (
               <Alert severity={approvedFeedback.severity}>
@@ -920,21 +991,10 @@ export default function AdminDashboard() {
             )}
           </SectionCard>
 
-          <SectionCard
+          <CalendarOverview
             title="Arrival calendar"
             description="Review confirmed import requests and prepare for upcoming arrivals."
-            variant="minimal"
-          >
-            <CalendarOverview
-              description={null}
-              sx={{
-                boxShadow: "none",
-                background: "transparent",
-                border: "none",
-                p: 0,
-              }}
-            />
-          </SectionCard>
+          />
         </Stack>
       </Container>
       <UserManagementDialog
