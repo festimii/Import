@@ -22,7 +22,6 @@ import { PickersDay } from "@mui/x-date-pickers/PickersDay";
 import { alpha } from "@mui/material/styles";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import Diversity3Icon from "@mui/icons-material/Diversity3";
-import Inventory2Icon from "@mui/icons-material/Inventory2";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import ViewInArIcon from "@mui/icons-material/ViewInAr";
 import { format } from "date-fns";
@@ -52,6 +51,197 @@ const formatPercent = (value, fractionDigits = 1) => {
 };
 
 const LIST_PREVIEW_LIMIT = 6;
+const CARD_MIN_WIDTH = 320;
+
+const BASE_CHIP_STYLES = {
+  height: "auto",
+  minHeight: 32,
+  alignItems: "flex-start",
+  justifyContent: "flex-start",
+  whiteSpace: "normal",
+  lineHeight: 1.25,
+  wordBreak: "break-word",
+  overflowWrap: "anywhere",
+  textAlign: "left",
+  px: 1,
+  py: 0.25,
+  boxSizing: "border-box",
+};
+
+const FULL_WIDTH_CHIP_STYLES = {
+  ...BASE_CHIP_STYLES,
+  width: "100%",
+  maxWidth: "100%",
+};
+
+const BATCH_SUM_FIELDS = [
+  "BoxCount",
+  "PalletCount",
+  "FullPallets",
+  "RemainingBoxes",
+  "WeightFullPalletsKg",
+  "VolumeFullPalletsM3",
+  "WeightRemainingKg",
+  "VolumeRemainingM3",
+  "TotalShipmentWeightKg",
+  "TotalShipmentVolumeM3",
+];
+
+const toNumberOrZero = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+};
+
+const pickEarlierDateValue = (currentValue, candidate) => {
+  if (!candidate) {
+    return currentValue ?? null;
+  }
+  if (!currentValue) {
+    return candidate;
+  }
+  const currentTime = new Date(currentValue).getTime();
+  const candidateTime = new Date(candidate).getTime();
+  if (Number.isNaN(currentTime) || Number.isNaN(candidateTime)) {
+    return currentValue;
+  }
+  return candidateTime < currentTime ? candidate : currentValue;
+};
+
+const aggregateConfirmedRequestsByBatch = (requests = []) => {
+  const groups = new Map();
+
+  requests.forEach((request, index) => {
+    if (!request) return;
+
+    const batchKey = request.BatchId ?? `legacy-${request.ID ?? index}`;
+    const arrivalKey = request.ArrivalDate ?? "unknown-arrival";
+    const compositeKey = `${batchKey}__${arrivalKey}`;
+
+    if (!groups.has(compositeKey)) {
+      groups.set(compositeKey, {
+        key: compositeKey,
+        batchId: request.BatchId ?? null,
+        primaryId: request.BatchId ?? request.ID ?? compositeKey,
+        arrivalDate: request.ArrivalDate ?? null,
+        earliestRequestDate: request.RequestDate ?? null,
+        importerSet: new Set(),
+        confirmedBySet: new Set(),
+        commentSet: new Set(),
+        articles: [],
+        totals: BATCH_SUM_FIELDS.reduce((acc, field) => {
+          acc[field] = 0;
+          return acc;
+        }, {}),
+        utilizationTotal: 0,
+        utilizationCount: 0,
+        requestIds: [],
+      });
+    }
+
+    const group = groups.get(compositeKey);
+    if (request.Importer) {
+      group.importerSet.add(request.Importer);
+    }
+    if (request.ConfirmedBy) {
+      group.confirmedBySet.add(request.ConfirmedBy);
+    }
+    if (request.Comment) {
+      group.commentSet.add(request.Comment);
+    }
+
+    group.articles.push({
+      article: request.Article,
+      articleName: request.ArticleName,
+    });
+
+    if (request.ID) {
+      group.requestIds.push(request.ID);
+    }
+
+    BATCH_SUM_FIELDS.forEach((field) => {
+      group.totals[field] += toNumberOrZero(request[field]);
+    });
+
+    const utilizationValue = Number(request.PalletVolumeUtilization);
+    if (Number.isFinite(utilizationValue)) {
+      group.utilizationTotal += utilizationValue;
+      group.utilizationCount += 1;
+    }
+
+    group.earliestRequestDate = pickEarlierDateValue(
+      group.earliestRequestDate,
+      request.RequestDate
+    );
+
+    if (!group.arrivalDate && request.ArrivalDate) {
+      group.arrivalDate = request.ArrivalDate;
+    }
+  });
+
+  return Array.from(groups.values()).map((group) => {
+    const importers = Array.from(group.importerSet).filter(Boolean);
+    const confirmedBy = Array.from(group.confirmedBySet).filter(Boolean);
+    const comments = Array.from(group.commentSet).filter(Boolean);
+    const importerList =
+      importers.length > 0 ? importers : ["Unknown importer"];
+
+    return {
+      ID: group.primaryId,
+      BatchKey: group.key,
+      BatchId: group.batchId,
+      ArrivalDate: group.arrivalDate,
+      RequestDate: group.earliestRequestDate,
+      Importer:
+        importerList.length === 1
+          ? importerList[0]
+          : `${importerList[0]} + ${importerList.length - 1} more`,
+      ImporterList: importerList,
+      ArticleDetails: group.articles,
+      ArticleCount: group.articles.length,
+      ...group.totals,
+      PalletVolumeUtilization:
+        group.utilizationCount > 0
+          ? group.utilizationTotal / group.utilizationCount
+          : null,
+      ConfirmedBy: confirmedBy.join(", ") || null,
+      ConfirmedByList: confirmedBy,
+      Comment: comments.join("\n") || null,
+      RequestIds: group.requestIds,
+    };
+  });
+};
+
+const summarizeArticles = (articles) => {
+  if (!Array.isArray(articles) || articles.length === 0) {
+    return "No articles";
+  }
+  const [first, ...rest] = articles;
+  const baseLabel = formatArticleLabel(first.article, first.articleName);
+  if (rest.length === 0) {
+    return baseLabel;
+  }
+  return `${baseLabel} + ${rest.length} more`;
+};
+
+const formatArticlesDetail = (articles) => {
+  if (!Array.isArray(articles) || articles.length === 0) {
+    return null;
+  }
+  const labels = articles
+    .map((item) => formatArticleLabel(item.article, item.articleName))
+    .filter(Boolean);
+  if (labels.length === 0) {
+    return null;
+  }
+  return `Articles: ${labels.join(", ")}`;
+};
+
+const formatBatchCode = (batchId) => {
+  if (!batchId || typeof batchId !== "string") {
+    return null;
+  }
+  return batchId.slice(0, 8).toUpperCase();
+};
 
 const CalendarOverview = ({
   title = "Confirmed arrivals overview",
@@ -66,6 +256,10 @@ const CalendarOverview = ({
   const [expandedKeys, setExpandedKeys] = useState({});
   const [showAllConfirmed, setShowAllConfirmed] = useState(false);
   const [showAllWms, setShowAllWms] = useState(false);
+  const confirmedBatches = useMemo(
+    () => aggregateConfirmedRequestsByBatch(confirmedRequests),
+    [confirmedRequests]
+  );
   const loadRequests = useCallback(async () => {
     setLoading(true);
     setFeedback(null);
@@ -111,7 +305,7 @@ const CalendarOverview = ({
   );
   const confirmedByDate = useMemo(() => {
     const grouped = new Map();
-    confirmedRequests.forEach((request) => {
+    confirmedBatches.forEach((request) => {
       if (!request.ArrivalDate) return;
       const parsed = new Date(request.ArrivalDate);
       if (Number.isNaN(parsed.getTime())) {
@@ -123,7 +317,7 @@ const CalendarOverview = ({
       grouped.set(key, events);
     });
     return grouped;
-  }, [confirmedRequests]);
+  }, [confirmedBatches]);
   const wmsByDate = useMemo(() => {
     const grouped = new Map();
     wmsOrders.forEach((order) => {
@@ -187,25 +381,26 @@ const CalendarOverview = ({
         const value = Number(item[field]);
         return Number.isFinite(value) ? acc + value : acc;
       }, 0);
-    const confirmedBoxes = sumField(confirmed, "BoxCount");
-    const wmsBoxes = sumField(wms, "BoxCount");
     const confirmedPallets = sumField(confirmed, "PalletCount");
     const wmsPallets = sumField(wms, "PalletCount");
     const uniqueImporters = new Set(
-      combined.map((item) => item.Importer).filter(Boolean)
+      combined.flatMap((item) => {
+        if (Array.isArray(item.ImporterList) && item.ImporterList.length > 0) {
+          return item.ImporterList;
+        }
+        if (item.Importer) {
+          return [item.Importer];
+        }
+        return [];
+      })
     );
     return {
       combinedCount: combined.length,
       confirmedCount: confirmed.length,
       wmsCount: wms.length,
-      totalBoxes: confirmedBoxes + wmsBoxes,
       totalPallets: confirmedPallets + wmsPallets,
       uniqueImporters: uniqueImporters.size,
       breakdown: {
-        boxes: {
-          confirmed: confirmedBoxes,
-          wms: wmsBoxes,
-        },
         pallets: {
           confirmed: confirmedPallets,
           wms: wmsPallets,
@@ -246,30 +441,6 @@ const CalendarOverview = ({
             key: "arrivals-wms",
             label: "WMS",
             value: formatNumeric(selectedAggregates.wmsCount),
-            color: "error.main",
-          },
-        ],
-      });
-    }
-
-    if (selectedAggregates.totalBoxes > 0) {
-      stats.push({
-        key: "total-boxes",
-        label: "Total boxes",
-        value: formatNumeric(selectedAggregates.totalBoxes),
-        caption: "Imports + WMS",
-        icon: Inventory2Icon,
-        segments: [
-          {
-            key: "boxes-imports",
-            label: "Imports",
-            value: formatNumeric(selectedAggregates.breakdown.boxes.confirmed),
-            color: "success.main",
-          },
-          {
-            key: "boxes-wms",
-            label: "WMS",
-            value: formatNumeric(selectedAggregates.breakdown.boxes.wms),
             color: "error.main",
           },
         ],
@@ -400,13 +571,20 @@ const CalendarOverview = ({
     return (
       <Stack spacing={0.75} sx={{ mt: 0.5 }}>
         {detailItems.length > 0 && (
-          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+          <Stack
+            direction="row"
+            spacing={0.5}
+            flexWrap="wrap"
+            useFlexGap
+            sx={{ rowGap: 0.5, columnGap: 0.5 }}
+          >
             {detailItems.map((detail, index) => (
               <Chip
                 key={`${detail}-${index}`}
                 label={detail}
                 size="small"
                 variant="outlined"
+                sx={BASE_CHIP_STYLES}
               />
             ))}
           </Stack>
@@ -568,91 +746,129 @@ const CalendarOverview = ({
               Confirmed import requests (
               {eventsForSelectedDate.confirmed.length})
             </Typography>
-                  <List
-                    dense
-                    disablePadding
-                    sx={{
-                display: "grid",
+            <List
+              dense
+              disablePadding
+              sx={{
+                display: "flex",
+                flexWrap: "wrap",
                 gap: 1.5,
-                gridTemplateColumns: {
-                  xs: "repeat(auto-fit, minmax(260px, 1fr))",
-                },
                 alignItems: "stretch",
               }}
             >
-              {confirmedVisible.map((request, index) => {
+              {confirmedVisible.map((batch, index) => {
                 const requestDate = (() => {
-                  if (!request.RequestDate) return "N/A";
-                  const parsed = new Date(request.RequestDate);
+                  if (!batch.RequestDate) return "N/A";
+                  const parsed = new Date(batch.RequestDate);
                   if (Number.isNaN(parsed.getTime())) {
-                    return request.RequestDate;
+                    return batch.RequestDate;
                   }
                   return format(parsed, "MMMM d, yyyy");
                 })();
 
                 const arrivalDate = (() => {
-                  if (!request.ArrivalDate) return "N/A";
-                  const parsed = new Date(request.ArrivalDate);
+                  if (!batch.ArrivalDate) return "N/A";
+                  const parsed = new Date(batch.ArrivalDate);
                   if (Number.isNaN(parsed.getTime())) {
-                    return request.ArrivalDate;
+                    return batch.ArrivalDate;
                   }
                   return format(parsed, "MMMM d, yyyy");
                 })();
 
+                const articleDetails = Array.isArray(batch.ArticleDetails)
+                  ? batch.ArticleDetails
+                  : [];
+                const articleSummary = summarizeArticles(articleDetails);
+                const articlesDetail = formatArticlesDetail(articleDetails);
+                const batchLabel = formatBatchCode(batch.BatchId);
+                const resolvedArticleCount = (() => {
+                  const numeric = Number(batch.ArticleCount);
+                  if (Number.isFinite(numeric) && numeric > 0) {
+                    return numeric;
+                  }
+                  return articleDetails.length;
+                })();
+                const articleCountLabel =
+                  resolvedArticleCount > 0
+                    ? `Articles: ${formatNumeric(resolvedArticleCount)}`
+                    : null;
+                const hasMultipleArticles = resolvedArticleCount > 1;
+
                 const chipItems = [
                   arrivalDate && `Arrival: ${arrivalDate}`,
-                  Number.isFinite(Number(request.BoxCount))
-                    ? `Boxes: ${formatNumeric(request.BoxCount)}`
+                  batchLabel ? `Batch: ${batchLabel}` : null,
+                  articleCountLabel,
+                  Number.isFinite(Number(batch.BoxCount))
+                    ? `Boxes: ${formatNumeric(batch.BoxCount)}`
                     : null,
-                  Number.isFinite(Number(request.PalletCount))
-                    ? `Pallets: ${formatNumeric(request.PalletCount)}`
+                  Number.isFinite(Number(batch.PalletCount))
+                    ? `Pallets: ${formatNumeric(batch.PalletCount)}`
                     : null,
-                  request.ConfirmedBy
-                    ? `Confirmed by ${request.ConfirmedBy}`
+                  batch.ConfirmedBy
+                    ? `Confirmed by ${batch.ConfirmedBy}`
                     : null,
                 ].filter(Boolean);
 
                 const detailItems = [
-                  Number.isFinite(Number(request.FullPallets))
-                    ? `Full pallets: ${formatNumeric(request.FullPallets, 2)}`
+                  articlesDetail,
+                  Number.isFinite(Number(batch.FullPallets))
+                    ? `Full pallets: ${formatNumeric(batch.FullPallets, 2)}`
                     : null,
-                  Number.isFinite(Number(request.RemainingBoxes))
+                  Number.isFinite(Number(batch.RemainingBoxes))
                     ? `Remaining boxes: ${formatNumeric(
-                        request.RemainingBoxes
+                        batch.RemainingBoxes
                       )}`
                     : null,
-                  Number.isFinite(Number(request.TotalShipmentWeightKg))
+                  Number.isFinite(Number(batch.TotalShipmentWeightKg))
                     ? `Total weight (kg): ${formatNumeric(
-                        request.TotalShipmentWeightKg,
+                        batch.TotalShipmentWeightKg,
                         2
                       )}`
                     : null,
-                  Number.isFinite(Number(request.TotalShipmentVolumeM3))
+                  Number.isFinite(Number(batch.TotalShipmentVolumeM3))
                     ? `Total volume (m3): ${formatNumeric(
-                        request.TotalShipmentVolumeM3,
+                        batch.TotalShipmentVolumeM3,
                         3
                       )}`
                     : null,
-                  Number.isFinite(Number(request.PalletVolumeUtilization))
+                  Number.isFinite(Number(batch.PalletVolumeUtilization))
                     ? `Utilization: ${formatPercent(
-                        request.PalletVolumeUtilization
+                        batch.PalletVolumeUtilization
                       )}`
                     : null,
                   requestDate && `Request date: ${requestDate}`,
                 ];
 
-                const detailKey = `confirmed-${request.ID ?? index}`;
+                const detailKey = `confirmed-${
+                  batch.BatchKey ?? batch.ID ?? index
+                }`;
+                const articleKey = `articles-${
+                  batch.BatchKey ?? batch.ID ?? index
+                }`;
                 const hasExpandedDetails =
-                  detailItems.some(Boolean) || Boolean(request.Comment);
+                  detailItems.some(Boolean) || Boolean(batch.Comment);
 
                 return (
                   <ListItem
                     key={
-                      request.ID ?? `${index}-${request.Article ?? "article"}`
+                      batch.BatchKey ??
+                      batch.ID ??
+                      `${index}-${articleSummary ?? "batch"}`
                     }
                     alignItems="flex-start"
                     disableGutters
                     sx={{
+                      alignSelf: "stretch",
+                      flex: {
+                        xs: "1 1 100%",
+                        sm: `1 1 ${CARD_MIN_WIDTH}px`,
+                      },
+                      minWidth: {
+                        xs: "100%",
+                        sm: CARD_MIN_WIDTH,
+                      },
+                      maxWidth: "100%",
+                      boxSizing: "border-box",
                       borderRadius: 2,
                       px: 1.5,
                       py: 1,
@@ -674,20 +890,21 @@ const CalendarOverview = ({
                       secondaryTypographyProps={{
                         component: "div",
                       }}
-                      primary={`${
-                        request.Importer ?? "Unknown importer"
-                      } - ${formatArticleLabel(
-                        request.Article,
-                        request.ArticleName
-                      )}`}
+                      primary={batch.Importer ?? "Unknown importer"}
+                      sx={{ width: "100%", maxWidth: "100%" }}
                       secondary={
                         <Stack spacing={0.75}>
                           {chipItems.length > 0 && (
                             <Stack
                               direction="row"
-                              spacing={0.75}
-                              useFlexGap
+                              spacing={0.5}
                               flexWrap="wrap"
+                              useFlexGap
+                              sx={{
+                                rowGap: 0.5,
+                                columnGap: 0.5,
+                                width: "100%",
+                              }}
                             >
                               {chipItems.map((chip) => (
                                 <Chip
@@ -695,9 +912,45 @@ const CalendarOverview = ({
                                   label={chip}
                                   size="small"
                                   variant="outlined"
+                                  sx={BASE_CHIP_STYLES}
                                 />
                               ))}
                             </Stack>
+                          )}
+                          {hasMultipleArticles && articleDetails.length > 0 && (
+                            <>
+                              <Button
+                                type="button"
+                                size="small"
+                                onClick={() => toggleExpanded(articleKey)}
+                                sx={{ alignSelf: "flex-start" }}
+                              >
+                                {isExpanded(articleKey)
+                                  ? "Hide articles"
+                                  : `View ${formatNumeric(
+                                      resolvedArticleCount
+                                    )} articles`}
+                              </Button>
+                              <Collapse in={isExpanded(articleKey)}>
+                                <Stack
+                                  spacing={0.5}
+                                  sx={{ mt: 0.5, width: "100%" }}
+                                >
+                                  {articleDetails.map((item, articleIdx) => (
+                                    <Chip
+                                      key={`${batch.BatchKey}-article-${articleIdx}`}
+                                      label={formatArticleLabel(
+                                        item.article,
+                                        item.articleName
+                                      )}
+                                      size="small"
+                                      variant="outlined"
+                                      sx={FULL_WIDTH_CHIP_STYLES}
+                                    />
+                                  ))}
+                                </Stack>
+                              </Collapse>
+                            </>
                           )}
                           {hasExpandedDetails && (
                             <>
@@ -713,7 +966,7 @@ const CalendarOverview = ({
                               </Button>
                               <Collapse in={isExpanded(detailKey)}>
                                 {renderDetailRows(detailItems, {
-                                  comment: request.Comment,
+                                  comment: batch.Comment,
                                   commentLabel: "Note",
                                 })}
                               </Collapse>
@@ -937,14 +1190,16 @@ const CalendarOverview = ({
                                     ? `Order ${order.OrderNumber}`
                                     : `NarID ${order.NarID ?? "N/A"}`
                                 }`}
+                                sx={{ width: "100%", maxWidth: "100%" }}
                                 secondary={
                                   <Stack spacing={0.75}>
                                     {chipItems.length > 0 && (
                                       <Stack
                                         direction="row"
-                                        spacing={0.75}
+                                        spacing={0.5}
                                         useFlexGap
                                         flexWrap="wrap"
+                                        sx={{ rowGap: 0.5, columnGap: 0.5 }}
                                       >
                                         {chipItems.map((chip) => (
                                           <Chip
@@ -952,6 +1207,7 @@ const CalendarOverview = ({
                                             label={chip}
                                             size="small"
                                             variant="outlined"
+                                            sx={BASE_CHIP_STYLES}
                                           />
                                         ))}
                                       </Stack>

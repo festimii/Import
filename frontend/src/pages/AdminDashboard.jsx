@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -26,6 +26,7 @@ import EventBusyRoundedIcon from "@mui/icons-material/EventBusyRounded";
 import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
+import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
 import API from "../api";
@@ -50,17 +51,15 @@ export default function AdminDashboard() {
   const [approvedRequests, setApprovedRequests] = useState([]);
   const [approvedLoading, setApprovedLoading] = useState(true);
   const [approvedFeedback, setApprovedFeedback] = useState(null);
+  const [wmsOrders, setWmsOrders] = useState([]);
+  const [wmsLoading, setWmsLoading] = useState(true);
+  const [wmsFeedback, setWmsFeedback] = useState(null);
   const notificationCenterRef = useRef(null);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [arrivalFilter, setArrivalFilter] = useState("");
   const [showMonthlyTable, setShowMonthlyTable] = useState(false);
   const theme = useTheme();
-
-  const monthlyRequests = useMemo(
-    () => importMetrics?.monthlyRequests ?? [],
-    [importMetrics]
-  );
 
   const topArticleGroups = useMemo(() => {
     const groups = importMetrics?.articleGroups ?? [];
@@ -104,6 +103,37 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadWmsOrders = async () => {
+    setWmsLoading(true);
+    setWmsFeedback(null);
+    try {
+      const res = await API.get("/imports/wms-orders");
+      const sorted = Array.isArray(res.data)
+        ? [...res.data].sort((a, b) => {
+            const dateA = a.ArrivalDate
+              ? new Date(a.ArrivalDate).getTime()
+              : a.ExpectedDate
+              ? new Date(a.ExpectedDate).getTime()
+              : 0;
+            const dateB = b.ArrivalDate
+              ? new Date(b.ArrivalDate).getTime()
+              : b.ExpectedDate
+              ? new Date(b.ExpectedDate).getTime()
+              : 0;
+            return dateA - dateB;
+          })
+        : [];
+      setWmsOrders(sorted);
+    } catch (error) {
+      setWmsFeedback({
+        severity: "error",
+        message: "Unable to load the WMS queue right now.",
+      });
+    } finally {
+      setWmsLoading(false);
+    }
+  };
+
   const loadUsers = async () => {
     setUsersLoading(true);
     setUserFeedback(null);
@@ -124,6 +154,7 @@ export default function AdminDashboard() {
     loadUsers();
     loadImportMetrics();
     loadApprovedRequests();
+    loadWmsOrders();
   }, []);
 
   useEffect(() => {
@@ -177,7 +208,7 @@ export default function AdminDashboard() {
   };
 
   const formatDate = (value) => {
-    if (!value) return "â€”";
+    if (!value) return "";
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) {
       return parsed.toLocaleDateString();
@@ -185,17 +216,33 @@ export default function AdminDashboard() {
     if (typeof value === "string" && value.length > 0) {
       return value;
     }
-    return "â€”";
+    return "";
   };
 
   const formatQuantity = (value, fractionDigits = 0) => {
-    if (value === null || value === undefined) return "â€”";
+    if (value === null || value === undefined) return "";
     const numericValue = Number(value);
-    if (!Number.isFinite(numericValue)) return "â€”";
+    if (!Number.isFinite(numericValue)) return "";
     return numericValue.toLocaleString(undefined, {
       minimumFractionDigits: fractionDigits,
       maximumFractionDigits: fractionDigits,
     });
+  };
+
+  const parseDateValue = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed;
+  };
+
+  const formatLeadTime = (value) => {
+    if (!Number.isFinite(value)) {
+      return "??";
+    }
+    return `${value.toFixed(1)} days`;
   };
 
   const handleOpenUserDialog = () => {
@@ -227,9 +274,9 @@ export default function AdminDashboard() {
   }, [users]);
 
   const formatNumber = (value) => {
-    if (value === null || value === undefined) return "â€”";
+    if (value === null || value === undefined) return "";
     const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return "â€”";
+    if (!Number.isFinite(numeric)) return "";
     return numeric.toLocaleString();
   };
 
@@ -384,6 +431,230 @@ export default function AdminDashboard() {
 
   const displayedApprovedGroups = filteredApprovedGroups.slice(0, 5);
 
+  const next30DayArrivals = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const endExclusive = new Date(today);
+    endExclusive.setDate(endExclusive.getDate() + 30);
+
+    const normalizeImporter = (value) => {
+      if (value === null || value === undefined) {
+        return "Unknown importer";
+      }
+      const trimmed = String(value).trim();
+      return trimmed.length > 0 ? trimmed : "Unknown importer";
+    };
+
+    const importerSet = new Set();
+    const bucketMap = new Map();
+    const totalsBySource = {
+      imports: { arrivals: 0, pallets: 0 },
+      wms: { arrivals: 0, pallets: 0 },
+    };
+
+    const sources = [
+      {
+        key: "imports",
+        records: approvedRequests,
+        getArrival: (record) => parseDateValue(record.ArrivalDate),
+        getPallets: (record) =>
+          Number(record.PalletCount ?? record.NumriPaletave ?? 0),
+        getImporter: (record) => normalizeImporter(record.Importer),
+      },
+      {
+        key: "wms",
+        records: wmsOrders,
+        getArrival: (record) =>
+          parseDateValue(record.ArrivalDate ?? record.ExpectedDate),
+        getPallets: (record) => Number(record.PalletCount ?? 0),
+        getImporter: (record) =>
+          normalizeImporter(record.Importer ?? record.CustomerName),
+      },
+    ];
+
+    for (const source of sources) {
+      for (const record of source.records) {
+        const arrivalDateRaw = source.getArrival(record);
+        if (!arrivalDateRaw) continue;
+
+        const arrivalDate = new Date(arrivalDateRaw);
+        arrivalDate.setHours(0, 0, 0, 0);
+
+        if (arrivalDate < today || arrivalDate >= endExclusive) {
+          continue;
+        }
+
+        const pallets = source.getPallets(record);
+        const importer = source.getImporter(record);
+        importerSet.add(importer);
+
+        const key = arrivalDate.toISOString().split("T")[0];
+        if (!bucketMap.has(key)) {
+          bucketMap.set(key, {
+            date: arrivalDate,
+            arrivals: { imports: 0, wms: 0, total: 0 },
+            pallets: { imports: 0, wms: 0, total: 0 },
+            importers: new Set(),
+          });
+        }
+
+        const bucket = bucketMap.get(key);
+        bucket.arrivals[source.key] += 1;
+        bucket.arrivals.total += 1;
+        bucket.importers.add(importer);
+        totalsBySource[source.key].arrivals += 1;
+
+        if (Number.isFinite(pallets) && pallets > 0) {
+          bucket.pallets[source.key] += pallets;
+          bucket.pallets.total += pallets;
+          totalsBySource[source.key].pallets += pallets;
+        }
+      }
+    }
+
+    const dailyBuckets = Array.from(bucketMap.values())
+      .sort((a, b) => a.date - b.date)
+      .map((bucket) => ({
+        ...bucket,
+        label: bucket.date.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        }),
+        importerCount: bucket.importers.size,
+      }));
+
+    const busiestDay = dailyBuckets.reduce((acc, current) => {
+      if (!acc || current.arrivals.total > acc.arrivals.total) {
+        return current;
+      }
+      return acc;
+    }, null);
+
+    const windowEndDisplay = new Date(endExclusive);
+    windowEndDisplay.setDate(windowEndDisplay.getDate() - 1);
+
+    const totalArrivals =
+      totalsBySource.imports.arrivals + totalsBySource.wms.arrivals;
+    const totalPallets =
+      totalsBySource.imports.pallets + totalsBySource.wms.pallets;
+
+    return {
+      start: today,
+      end: windowEndDisplay,
+      totalArrivals,
+      totalPallets,
+      uniqueImporters: importerSet.size,
+      dailyBuckets,
+      busiestDay,
+      totalsBySource,
+    };
+  }, [approvedRequests, wmsOrders]);
+
+  const leadTimeStats = useMemo(() => {
+    if (!approvedRequests.length) {
+      return null;
+    }
+
+    let total = 0;
+    let count = 0;
+    let min = Infinity;
+    let max = -Infinity;
+
+    approvedRequests.forEach((request) => {
+      const requestDate = parseDateValue(request.RequestDate);
+      const arrivalDate = parseDateValue(request.ArrivalDate);
+      if (!requestDate || !arrivalDate) {
+        return;
+      }
+      const diffDays =
+        (arrivalDate.getTime() - requestDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (!Number.isFinite(diffDays)) {
+        return;
+      }
+      total += diffDays;
+      count += 1;
+      min = Math.min(min, diffDays);
+      max = Math.max(max, diffDays);
+    });
+
+    if (count === 0) {
+      return null;
+    }
+
+    return {
+      average: total / count,
+      min,
+      max,
+    };
+  }, [approvedRequests]);
+
+  const importerInsights = useMemo(() => {
+    if (!approvedRequests.length) {
+      return [];
+    }
+
+    const map = new Map();
+
+    approvedRequests.forEach((request) => {
+      const importerKey = (request.Importer || "Unknown importer").trim();
+      const boxes = Number(request.BoxCount ?? request.NumriPakove ?? 0);
+      const pallets = Number(request.PalletCount ?? request.NumriPaletave ?? 0);
+      const arrivalDate = parseDateValue(request.ArrivalDate);
+      const requestDate = parseDateValue(request.RequestDate);
+
+      const current = map.get(importerKey) || {
+        importer: importerKey,
+        requests: 0,
+        boxes: 0,
+        pallets: 0,
+        nextArrival: null,
+        leadTotal: 0,
+        leadCount: 0,
+      };
+
+      current.requests += 1;
+      if (Number.isFinite(boxes)) {
+        current.boxes += boxes;
+      }
+      if (Number.isFinite(pallets)) {
+        current.pallets += pallets;
+      }
+
+      if (arrivalDate) {
+        if (
+          !current.nextArrival ||
+          arrivalDate.getTime() < current.nextArrival.getTime()
+        ) {
+          current.nextArrival = arrivalDate;
+        }
+      }
+
+      if (arrivalDate && requestDate) {
+        const diffDays =
+          (arrivalDate.getTime() - requestDate.getTime()) /
+          (1000 * 60 * 60 * 24);
+        if (Number.isFinite(diffDays)) {
+          current.leadTotal += diffDays;
+          current.leadCount += 1;
+        }
+      }
+
+      map.set(importerKey, current);
+    });
+
+    return Array.from(map.values())
+      .map((entry) => ({
+        importer: entry.importer,
+        requests: entry.requests,
+        boxes: entry.boxes,
+        pallets: entry.pallets,
+        avgLead: entry.leadCount ? entry.leadTotal / entry.leadCount : null,
+        nextArrival: entry.nextArrival,
+      }))
+      .sort((a, b) => b.pallets - a.pallets)
+      .slice(0, 6);
+  }, [approvedRequests]);
+
   const capacityChips = useMemo(() => {
     if (importMetricsLoading) {
       return [];
@@ -399,16 +670,15 @@ export default function AdminDashboard() {
       chips.push({ label, value: formatNumber(numeric) });
     };
 
-    pushNumberChip("Total boxes", importMetrics?.totalBoxes);
     pushNumberChip("Total pallets", importMetrics?.totalPallets);
 
     const avgBoxes = formatQuantity(importMetrics?.averageBoxes, 2);
-    if (avgBoxes !== "—") {
+    if (avgBoxes !== "?") {
       chips.push({ label: "Avg. boxes / request", value: `${avgBoxes} boxes` });
     }
 
     const avgPallets = formatQuantity(importMetrics?.averagePallets, 2);
-    if (avgPallets !== "—") {
+    if (avgPallets !== "?") {
       chips.push({
         label: "Avg. pallets / request",
         value: `${avgPallets} pallets`,
@@ -426,6 +696,25 @@ export default function AdminDashboard() {
 
     return chips;
   }, [importMetrics, importMetricsLoading]);
+
+  const performanceChips = useMemo(() => {
+    const chips = [...capacityChips];
+    if (leadTimeStats) {
+      chips.push({
+        label: "Avg. lead time",
+        value: formatLeadTime(leadTimeStats.average),
+      });
+      chips.push({
+        label: "Fastest lead time",
+        value: formatLeadTime(leadTimeStats.min),
+      });
+      chips.push({
+        label: "Slowest lead time",
+        value: formatLeadTime(leadTimeStats.max),
+      });
+    }
+    return chips;
+  }, [capacityChips, leadTimeStats]);
 
   return (
     <Box
@@ -574,7 +863,7 @@ export default function AdminDashboard() {
                 <StatCard
                   icon={<GroupsRoundedIcon />}
                   label="Active users"
-                  value={usersLoading ? "â€¦" : totalUsers}
+                  value={usersLoading ? "" : totalUsers}
                   trend="Invite colleagues to streamline handoffs"
                 />
               </Grid>
@@ -582,7 +871,7 @@ export default function AdminDashboard() {
                 <StatCard
                   icon={<VerifiedUserRoundedIcon />}
                   label="Confirmers"
-                  value={usersLoading ? "â€¦" : confirmerCount}
+                  value={usersLoading ? "" : confirmerCount}
                   trend="Ensure every lane has an approval owner"
                   color="secondary"
                 />
@@ -591,7 +880,7 @@ export default function AdminDashboard() {
                 <StatCard
                   icon={<EventBusyRoundedIcon />}
                   label="Requesters"
-                  value={usersLoading ? "â€¦" : requesterCount}
+                  value={usersLoading ? "" : requesterCount}
                   trend="Balance intake across teams"
                   color="info"
                 />
@@ -656,7 +945,7 @@ export default function AdminDashboard() {
                 />
               </Grid>
             </Grid>
-            {capacityChips.length > 0 && (
+            {performanceChips.length > 0 && (
               <Stack
                 direction={{ xs: "column", md: "row" }}
                 spacing={1}
@@ -664,7 +953,7 @@ export default function AdminDashboard() {
                 flexWrap="wrap"
                 sx={{ mt: 2 }}
               >
-                {capacityChips.map((chip) => (
+                {performanceChips.map((chip) => (
                   <Chip
                     key={chip.label}
                     label={`${chip.label}: ${chip.value}`}
@@ -673,6 +962,192 @@ export default function AdminDashboard() {
                   />
                 ))}
               </Stack>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Next 30-day arrivals"
+            description="Preview confirmed deliveries scheduled for the next 30 days and align resources ahead of time."
+          >
+            {(approvedLoading || wmsLoading) ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                <CircularProgress color="primary" />
+              </Box>
+            ) : next30DayArrivals.dailyBuckets.length ? (
+              <Stack spacing={3}>
+                {(approvedFeedback || wmsFeedback) && (
+                  <Alert
+                    severity={(approvedFeedback ?? wmsFeedback)?.severity || "warning"}
+                  >
+                    {approvedFeedback?.message ||
+                      wmsFeedback?.message ||
+                      "Latest arrival data may be incomplete."}
+                  </Alert>
+                )}
+                <LineChart
+                  height={360}
+                  xAxis={[
+                    {
+                      data: next30DayArrivals.dailyBuckets.map(
+                        (bucket) => bucket.label
+                      ),
+                      scaleType: "point",
+                    },
+                  ]}
+                  yAxis={[
+                    { id: "arrivals", label: "Arrivals" },
+                    {
+                      id: "capacity",
+                      label: "Pallets",
+                      position: "right",
+                    },
+                  ]}
+                  series={[
+                    {
+                      id: "arrivals",
+                      label: "Arrivals",
+                      data: next30DayArrivals.dailyBuckets.map(
+                        (bucket) => bucket.arrivals.total
+                      ),
+                      color: theme.palette.primary.main,
+                      yAxisKey: "arrivals",
+                      area: true,
+                      curve: "catmullRom",
+                      showMark: false,
+                    },
+                    {
+                      id: "importPallets",
+                      label: "Import pallets",
+                      data: next30DayArrivals.dailyBuckets.map(
+                        (bucket) => bucket.pallets.imports
+                      ),
+                      color: theme.palette.secondary.main,
+                      yAxisKey: "capacity",
+                      curve: "catmullRom",
+                      showMark: true,
+                    },
+                    {
+                      id: "wmsPallets",
+                      label: "WMS pallets",
+                      data: next30DayArrivals.dailyBuckets.map((bucket) =>
+                        wmsFeedback ? null : bucket.pallets.wms
+                      ),
+                      color: theme.palette.success.dark,
+                      yAxisKey: "capacity",
+                      curve: "catmullRom",
+                      showMark: true,
+                      lineStyle: wmsFeedback
+                        ? { strokeDasharray: "6 6" }
+                        : undefined,
+                    },
+                  ]}
+                  margin={{ top: 40, left: 60, right: 50, bottom: 40 }}
+                  slotProps={{
+                    legend: {
+                      position: { vertical: "top", horizontal: "right" },
+                      direction: "row",
+                    },
+                  }}
+                />
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={4}>
+                    <StatCard
+                      icon={<CalendarMonthRoundedIcon />}
+                      label="Arrivals scheduled"
+                      value={formatNumber(next30DayArrivals.totalArrivals)}
+                      trend={`${next30DayArrivals.start.toLocaleDateString()} - ${next30DayArrivals.end.toLocaleDateString()}`}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <StatCard
+                      icon={<LocalShippingIcon />}
+                      label="Capacity inbound"
+                      value={`${formatQuantity(
+                        next30DayArrivals.totalPallets
+                      )} pallets`}
+                      trend={`Imports ${formatQuantity(
+                        next30DayArrivals.totalsBySource.imports.pallets
+                      )} | WMS ${formatQuantity(
+                        next30DayArrivals.totalsBySource.wms.pallets
+                      )}`}
+                      color="secondary"
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <StatCard
+                      icon={<EventAvailableRoundedIcon />}
+                      label="Busiest day"
+                      value={
+                        next30DayArrivals.busiestDay
+                          ? next30DayArrivals.busiestDay.label
+                          : "No congestion"
+                      }
+                      trend={
+                        next30DayArrivals.busiestDay
+                          ? `${formatNumber(
+                              next30DayArrivals.busiestDay.arrivals.total
+                            )} arrivals | ${formatQuantity(
+                              next30DayArrivals.busiestDay.pallets.total
+                            )} pallets`
+                          : "Evenly distributed"
+                      }
+                      color="warning"
+                    />
+                  </Grid>
+                </Grid>
+                <Stack
+                  direction={{ xs: "column", md: "row" }}
+                  spacing={1}
+                  useFlexGap
+                  flexWrap="wrap"
+                >
+                  <Chip
+                    label={`Unique importers: ${formatNumber(
+                      next30DayArrivals.uniqueImporters
+                    )}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip
+                    label={`Avg. arrivals/day: ${formatQuantity(
+                      next30DayArrivals.totalArrivals /
+                        Math.max(next30DayArrivals.dailyBuckets.length, 1),
+                      1
+                    )}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip
+                    label={`Avg. pallets/day: ${formatQuantity(
+                      next30DayArrivals.totalPallets /
+                        Math.max(next30DayArrivals.dailyBuckets.length, 1),
+                      1
+                    )}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip
+                    label={`Import pallets: ${formatQuantity(
+                      next30DayArrivals.totalsBySource.imports.pallets
+                    )}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip
+                    label={`WMS pallets: ${formatQuantity(
+                      next30DayArrivals.totalsBySource.wms.pallets
+                    )}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                </Stack>
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No confirmed arrivals are scheduled in the next 30 days.
+                Approved or WMS requests will appear here once they fall within
+                the rolling window.
+              </Typography>
             )}
           </SectionCard>
 
@@ -765,6 +1240,71 @@ export default function AdminDashboard() {
                 No aggregated article insights are available yet. Once multiple
                 requests are submitted this section will highlight trends
                 automatically.
+              </Typography>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Importer workload leaderboard"
+            description="Spot which importers drive the largest confirmed volume and when their next pallets arrive."
+          >
+            {approvedLoading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+                <CircularProgress color="primary" />
+              </Box>
+            ) : importerInsights.length ? (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600 }}>Importer</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Requests
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Boxes
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Pallets
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Avg. lead time
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                      Next arrival
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {importerInsights.map((entry) => (
+                    <TableRow key={entry.importer} hover>
+                      <TableCell>{entry.importer}</TableCell>
+                      <TableCell align="right">
+                        {formatNumber(entry.requests)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatNumber(entry.boxes)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatNumber(entry.pallets)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {entry.avgLead !== null
+                          ? formatLeadTime(entry.avgLead)
+                          : "-"}
+                      </TableCell>
+                      <TableCell align="right">
+                        {entry.nextArrival
+                          ? entry.nextArrival.toLocaleDateString()
+                          : "-"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No confirmed importer data is available yet. Once requests are
+                approved this leaderboard will rank the busiest partners.
               </Typography>
             )}
           </SectionCard>
@@ -887,7 +1427,7 @@ export default function AdminDashboard() {
                               <Typography variant="body1">
                                 {`${formatQuantity(
                                   group.totalBoxes
-                                )} boxes · ${formatQuantity(
+                                )} boxes ? ${formatQuantity(
                                   group.totalPallets
                                 )} pallets`}
                               </Typography>
@@ -936,3 +1476,5 @@ export default function AdminDashboard() {
     </Box>
   );
 }
+
+

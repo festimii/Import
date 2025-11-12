@@ -1,6 +1,6 @@
 import express from "express";
 import sql from "mssql";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { poolPromise } from "../db.js";
@@ -26,6 +26,65 @@ const trimString = (value) => {
 
   const trimmed = String(value).trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeDateForBatch = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return null;
+    }
+    return value.toISOString().split("T")[0];
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().split("T")[0];
+    }
+  }
+
+  return null;
+};
+
+const hashTextToGuid = (value) => {
+  const hex = createHash("sha256").update(value).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+};
+
+const deriveBatchIdFromCombination = ({
+  importer,
+  requestDate,
+  arrivalDate,
+  fallbackId,
+}) => {
+  const importerPart = trimString(importer);
+  const requestPart = normalizeDateForBatch(requestDate);
+  const arrivalPart = normalizeDateForBatch(arrivalDate);
+
+  if (!importerPart || !requestPart || !arrivalPart) {
+    return fallbackId ?? randomUUID();
+  }
+
+  const compositeKey = [
+    importerPart.toLowerCase(),
+    requestPart,
+    arrivalPart,
+  ].join("|");
+
+  return hashTextToGuid(compositeKey);
 };
 
 const normalizeArticleCode = (value) => {
@@ -368,6 +427,15 @@ const mapWmsOrders = (records) =>
 
     return mapped;
   });
+
+const mapWmsOrderResponse = (record) => {
+  if (!record) {
+    return null;
+  }
+
+  const [mapped] = mapWmsOrders([record]);
+  return mapped;
+};
 
 let importRequestFeatureState = {
   checked: false,
@@ -1062,6 +1130,17 @@ const insertImportRequestItems = async ({
         throw error;
       }
 
+      const resolvedBatchId =
+        includeBatchId
+          ? current.batchId ??
+            deriveBatchIdFromCombination({
+              importer: importerValue,
+              requestDate: requestDateValue,
+              arrivalDate: arrivalDateValue,
+              fallbackId: effectiveBatchId,
+            })
+          : null;
+
       let calculation = current.calculation ?? null;
       if (!calculation) {
         try {
@@ -1128,7 +1207,7 @@ const insertImportRequestItems = async ({
         .input("Useri", requesterUsername);
 
       if (includeBatchId) {
-        request.input("BatchId", effectiveBatchId);
+        request.input("BatchId", resolvedBatchId);
       }
 
       const result = await request.query(`INSERT INTO ImportRequests (
@@ -1236,7 +1315,7 @@ const insertImportRequestItems = async ({
       if (includeExcelDetails && current.excelMeta) {
         await insertExcelDetails(transaction, {
           requestId: record.ID,
-          batchId: effectiveBatchId,
+          batchId: resolvedBatchId,
           meta: current.excelMeta,
         });
       }
@@ -1621,8 +1700,26 @@ router.post(
       }
 
       const { hasBatchId } = await getImportRequestFeatureState();
+      const distinctBatchIds =
+        hasBatchId && insertedRecords.length > 0
+          ? Array.from(
+              new Set(
+                insertedRecords
+                  .map((item) => item.BatchId)
+                  .filter((value) => Boolean(value))
+              )
+            )
+          : [];
+
       res.json({
-        ...(hasBatchId ? { batchId } : {}),
+        ...(hasBatchId
+          ? {
+              batchIds: distinctBatchIds,
+              ...(distinctBatchIds.length === 1
+                ? { batchId: distinctBatchIds[0] }
+                : {}),
+            }
+          : {}),
         items: insertedRecords,
         importer: importerSummary,
         arrivalDate: arrivalSummary,
@@ -2128,21 +2225,30 @@ router.get(
     try {
       await ensureWmsOrdersSchema();
       const pool = await poolPromise;
-      const result = await pool.request().query(`SELECT ID,
+      const result = await pool.request().query(`SELECT NarID,
                      OrderId,
                      OrderTypeCode,
                      OrderNumber,
                      CustomerCode,
                      CustomerName,
+                     Importer,
+                     Article,
+                     ArticleDescription,
+                     ArticleCount,
+                     BoxCount,
+                     PalletCount,
                      OrderDate,
                      ExpectedDate,
+                     ArrivalDate,
                      IsRealized,
                      OrderStatus,
                      Description,
                      SourceReference,
+                     Comment,
                      ScheduledStart,
                      OriginalOrderNumber,
                      CanProceed,
+                     SourceUpdatedAt,
                      LastSyncedAt
               FROM WmsOrders
               ORDER BY ExpectedDate ASC, OrderDate ASC, OrderId ASC`);
