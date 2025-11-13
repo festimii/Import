@@ -1,11 +1,16 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Chip,
+  CircularProgress,
   Collapse,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Grid,
   Paper,
@@ -24,6 +29,7 @@ import AddCircleRoundedIcon from "@mui/icons-material/AddCircleRounded";
 import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
 import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import EventRepeatRoundedIcon from "@mui/icons-material/EventRepeatRounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import API from "../api";
@@ -160,8 +166,103 @@ const ITEM_COLUMNS = [
   },
 ];
 
+const decodeUsernameFromToken = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const token = window.localStorage?.getItem("token");
+  if (!token) {
+    return null;
+  }
+  try {
+    const payloadSegment = token.split(".")[1];
+    if (!payloadSegment) {
+      return null;
+    }
+    const normalized = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = JSON.parse(window.atob(normalized));
+    return decoded.username ?? decoded.sub ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const STATUS_COLOR_MAP = {
+  approved: "success",
+  pending: "warning",
+  rejected: "error",
+};
+
+const pickEarlierDateValue = (currentValue, candidate) => {
+  if (!candidate) {
+    return currentValue ?? null;
+  }
+  if (!currentValue) {
+    return candidate;
+  }
+  const currentTime = new Date(currentValue).getTime();
+  const candidateTime = new Date(candidate).getTime();
+  if (Number.isNaN(currentTime) || Number.isNaN(candidateTime)) {
+    return currentValue;
+  }
+  return candidateTime < currentTime ? candidate : currentValue;
+};
+
+const toDateInputValue = (value) => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return typeof value === "string" && value.length >= 10
+      ? value.slice(0, 10)
+      : "";
+  }
+  return parsed.toISOString().split("T")[0];
+};
+
+const formatDateLabel = (value) => {
+  if (!value) return "N/A";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return typeof value === "string" && value.trim().length > 0 ? value : "N/A";
+  }
+  return parsed.toLocaleDateString();
+};
+
+const describeVarianceLabel = (planned, actual) => {
+  if (!planned || !actual) {
+    return null;
+  }
+  const plannedTime = new Date(planned).getTime();
+  const actualTime = new Date(actual).getTime();
+  if (Number.isNaN(plannedTime) || Number.isNaN(actualTime)) {
+    return null;
+  }
+  const diffDays = Math.round(
+    (actualTime - plannedTime) / (1000 * 60 * 60 * 24)
+  );
+  if (diffDays === 0) {
+    return "On time";
+  }
+  const direction = diffDays > 0 ? "late" : "early";
+  const absoluteDays = Math.abs(diffDays);
+  return `${absoluteDays} day${absoluteDays === 1 ? "" : "s"} ${direction}`;
+};
+
+const formatStatusLabel = (status) => {
+  const normalized = String(status ?? "pending").toLowerCase();
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const getStatusChipColor = (status, isMixed) => {
+  if (isMixed) {
+    return "info";
+  }
+  return STATUS_COLOR_MAP[status] ?? "default";
+};
+
 export default function RequesterDashboard() {
   const currentDate = today();
+  const requesterUsername = useMemo(() => decodeUsernameFromToken(), []);
   const [importer, setImporter] = useState("");
   const [items, setItems] = useState([{ article: "", boxCount: "" }]);
   const [arrivalDate, setArrivalDate] = useState("");
@@ -175,6 +276,40 @@ export default function RequesterDashboard() {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [showAdvancedTotals, setShowAdvancedTotals] = useState(false);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
+  const [submittedRequests, setSubmittedRequests] = useState([]);
+  const [submittedLoading, setSubmittedLoading] = useState(true);
+  const [submittedFeedback, setSubmittedFeedback] = useState(null);
+  const [requestsLastLoadedAt, setRequestsLastLoadedAt] = useState(null);
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [editArrivalDate, setEditArrivalDate] = useState("");
+  const [editFeedback, setEditFeedback] = useState(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
+  const loadSubmittedRequests = useCallback(async () => {
+    setSubmittedLoading(true);
+    try {
+      const response = await API.get("/imports/mine");
+      const records = Array.isArray(response.data) ? response.data : [];
+      setSubmittedRequests(records);
+      setRequestsLastLoadedAt(new Date());
+      setSubmittedFeedback((previous) =>
+        previous?.severity === "error" ? null : previous
+      );
+    } catch (error) {
+      setSubmittedFeedback({
+        severity: "error",
+        message:
+          error?.response?.data?.message ??
+          "We couldn't load your submitted imports. Please try again.",
+      });
+    } finally {
+      setSubmittedLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSubmittedRequests();
+  }, [loadSubmittedRequests]);
 
   const handleItemChange = (index, field, value) => {
     setItems((previous) =>
@@ -203,6 +338,69 @@ export default function RequesterDashboard() {
     setExcelFiles([]);
     if (excelInputRef.current) {
       excelInputRef.current.value = "";
+    }
+  };
+
+  const handleOpenArrivalRevision = (group) => {
+    if (!group || !group.canEditArrival) {
+      return;
+    }
+    setEditFeedback(null);
+    const defaultDate =
+      group.plannedArrivalDate ??
+      group.actualArrivalDate ??
+      group.requestDate ??
+      "";
+    setEditArrivalDate(toDateInputValue(defaultDate));
+    setEditingGroup(group);
+  };
+
+  const handleCloseArrivalRevision = () => {
+    if (editSubmitting) {
+      return;
+    }
+    setEditingGroup(null);
+    setEditArrivalDate("");
+    setEditFeedback(null);
+  };
+
+  const handleSubmitArrivalRevision = async () => {
+    if (!editingGroup) return;
+    if (!editArrivalDate) {
+      setEditFeedback({
+        severity: "error",
+        message: "Please choose a new arrival date before continuing.",
+      });
+      return;
+    }
+
+    setEditSubmitting(true);
+    setEditFeedback(null);
+    try {
+      await Promise.all(
+        editingGroup.items.map((item) =>
+          API.patch(`/imports/${item.ID}/requester-arrival`, {
+            arrivalDate: editArrivalDate,
+          })
+        )
+      );
+      setSubmittedFeedback({
+        severity: "success",
+        message: `Updated the planned arrival for ${
+          editingGroup.items.length
+        } article${editingGroup.items.length === 1 ? "" : "s"}.`,
+      });
+      handleCloseArrivalRevision();
+      await loadSubmittedRequests();
+    } catch (error) {
+      setEditFeedback({
+        severity: "error",
+        message:
+          error?.response?.data?.message ??
+          "We couldn't update the arrival date. Please try again.",
+      });
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -330,6 +528,8 @@ export default function RequesterDashboard() {
       if (hasExcelFiles) {
         handleExcelClear();
       }
+
+      await loadSubmittedRequests();
     } catch (error) {
       setFeedback({
         severity: "error",
@@ -430,6 +630,22 @@ export default function RequesterDashboard() {
     );
   };
 
+  const renderInfoItem = (label, value, helperText) => (
+    <Stack key={label} spacing={0.25}>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="body1" fontWeight={600}>
+        {value}
+      </Typography>
+      {helperText && (
+        <Typography variant="caption" color="text.secondary">
+          {helperText}
+        </Typography>
+      )}
+    </Stack>
+  );
+
   const summarySnapshot = summaryTotals
     ? [
         { label: "Importer", value: firstSubmittedItem.Importer ?? "--" },
@@ -444,6 +660,111 @@ export default function RequesterDashboard() {
         { label: "Articles", value: summaryTotals.itemCount ?? 0 },
       ]
     : [];
+
+  const groupedSubmissions = useMemo(() => {
+    if (!Array.isArray(submittedRequests) || submittedRequests.length === 0) {
+      return [];
+    }
+    const groups = new Map();
+
+    submittedRequests.forEach((request, index) => {
+      if (!request) return;
+      const key = request.BatchId ?? `legacy-${request.ID ?? index}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          batchId: request.BatchId ?? null,
+          importer: request.Importer ?? "Unknown importer",
+          items: [],
+          articleDetails: [],
+          statusCounts: {},
+          statuses: new Set(),
+          requestDate: null,
+          plannedArrivalDate: null,
+          actualArrivalDate: null,
+          hasActualArrival: false,
+          createdAt: request.CreatedAt ?? null,
+        });
+      }
+      const group = groups.get(key);
+      group.items.push(request);
+      group.articleDetails.push({
+        article: request.Article,
+        articleName: request.ArticleName,
+      });
+      group.requestDate = pickEarlierDateValue(
+        group.requestDate,
+        request.RequestDate
+      );
+      group.plannedArrivalDate = pickEarlierDateValue(
+        group.plannedArrivalDate,
+        request.PlannedArrivalDate ?? request.ArrivalDate ?? null
+      );
+      if (request.ActualArrivalDate) {
+        group.hasActualArrival = true;
+        group.actualArrivalDate = pickEarlierDateValue(
+          group.actualArrivalDate,
+          request.ActualArrivalDate
+        );
+      }
+      group.createdAt = pickEarlierDateValue(
+        group.createdAt,
+        request.CreatedAt
+      );
+      if (request.Importer) {
+        group.importer = request.Importer;
+      }
+      const normalizedStatus = (request.Status || "pending").toLowerCase();
+      group.statusCounts[normalizedStatus] =
+        (group.statusCounts[normalizedStatus] || 0) + 1;
+      group.statuses.add(normalizedStatus);
+    });
+
+    return Array.from(groups.values())
+      .map((group) => {
+        const statuses = Array.from(group.statuses);
+        const isMixed = statuses.length > 1;
+        const primaryStatus = isMixed ? null : statuses[0];
+        return {
+          ...group,
+          statusLabel: isMixed
+            ? "Multiple statuses"
+            : formatStatusLabel(primaryStatus),
+          statusColor: getStatusChipColor(primaryStatus, isMixed),
+          varianceLabel: describeVarianceLabel(
+            group.plannedArrivalDate,
+            group.actualArrivalDate
+          ),
+          canEditArrival: !group.hasActualArrival,
+        };
+      })
+      .sort((a, b) => {
+        const aTime = (() => {
+          const source =
+            a.plannedArrivalDate || a.requestDate || a.createdAt || null;
+          if (!source) return 0;
+          const parsed = new Date(source);
+          return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+        })();
+        const bTime = (() => {
+          const source =
+            b.plannedArrivalDate || b.requestDate || b.createdAt || null;
+          if (!source) return 0;
+          const parsed = new Date(source);
+          return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+        })();
+        return bTime - aTime;
+      });
+  }, [submittedRequests]);
+
+  const requestsLastSyncedLabel = useMemo(() => {
+    if (!requestsLastLoadedAt) {
+      return submittedLoading
+        ? "Syncing your submissions..."
+        : "Not synced yet";
+    }
+    return `Updated ${requestsLastLoadedAt.toLocaleString()}`;
+  }, [requestsLastLoadedAt, submittedLoading]);
 
   const formatQuantity = (value, fractionDigits = 0) => {
     if (value === null || value === undefined) {
@@ -478,9 +799,12 @@ export default function RequesterDashboard() {
         display: "flex",
         flexDirection: "column",
         background: (theme) =>
-          `linear-gradient(180deg, ${alpha(theme.palette.primary.light, 0.12)} 0%, ${
-            theme.palette.background.default
-          } 40%, ${theme.palette.background.paper} 100%)`,
+          `linear-gradient(180deg, ${alpha(
+            theme.palette.primary.light,
+            0.12
+          )} 0%, ${theme.palette.background.default} 40%, ${
+            theme.palette.background.paper
+          } 100%)`,
       }}
     >
       <PageHero
@@ -712,7 +1036,9 @@ export default function RequesterDashboard() {
                     </Button>
                   </Stack>
 
-                  <Divider textAlign="left">Import nga Excel (opsionale)</Divider>
+                  <Divider textAlign="left">
+                    Import nga Excel (opsionale)
+                  </Divider>
 
                   <Paper
                     variant="outlined"
@@ -823,6 +1149,9 @@ export default function RequesterDashboard() {
           <CalendarOverview
             title="Calendari i Arritjeve te Konfirmuara"
             description=" "
+            allowRequesterReschedule
+            requesterUsername={requesterUsername}
+            onRequesterReschedule={loadSubmittedRequests}
           />
 
           {latestItems.length > 0 && (
@@ -993,6 +1322,63 @@ export default function RequesterDashboard() {
           )}
         </Stack>
       </Container>
+      <Dialog
+        open={Boolean(editingGroup)}
+        onClose={handleCloseArrivalRevision}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Update planned arrival</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            {editingGroup && (
+              <Typography variant="body2" color="text.secondary">
+                Adjust the arrival date for{" "}
+                <Typography
+                  component="span"
+                  fontWeight={600}
+                  color="text.primary"
+                >
+                  {editingGroup.importer}
+                </Typography>
+                . All {editingGroup.items.length} article
+                {editingGroup.items.length === 1 ? "" : "s"} in this submission
+                will move back to pending confirmation.
+              </Typography>
+            )}
+            {editFeedback && (
+              <Alert severity={editFeedback.severity}>
+                {editFeedback.message}
+              </Alert>
+            )}
+            <TextField
+              label="New planned arrival date"
+              type="date"
+              value={editArrivalDate}
+              onChange={(event) => setEditArrivalDate(event.target.value)}
+              InputLabelProps={{ shrink: true }}
+              required
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2.5 }}>
+          <Button
+            onClick={handleCloseArrivalRevision}
+            disabled={editSubmitting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmitArrivalRevision}
+            variant="contained"
+            color="secondary"
+            disabled={editSubmitting}
+          >
+            {editSubmitting ? "Saving…" : "Save changes"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

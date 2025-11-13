@@ -7,12 +7,17 @@ import {
   Chip,
   CircularProgress,
   Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   List,
   ListItem,
   ListItemText,
   Paper,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -48,6 +53,53 @@ const formatPercent = (value, fractionDigits = 1) => {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   })}%`;
+};
+
+const toDateInputValue = (value) => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return typeof value === "string" && value.length >= 10
+      ? value.slice(0, 10)
+      : "";
+  }
+  return parsed.toISOString().split("T")[0];
+};
+
+const parseDateValue = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+};
+
+const formatLongDate = (value) => {
+  const parsed = parseDateValue(value);
+  if (parsed) {
+    return format(parsed, "MMMM d, yyyy");
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+  return null;
+};
+
+const describeArrivalVariance = (planned, actual) => {
+  const plannedDate = parseDateValue(planned);
+  const actualDate = parseDateValue(actual);
+  if (!plannedDate || !actualDate) {
+    return null;
+  }
+  const diffMs = actualDate.getTime() - plannedDate.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) {
+    return "On time";
+  }
+  const direction = diffDays > 0 ? "late" : "early";
+  const absoluteDays = Math.abs(diffDays);
+  return `${absoluteDays} day${absoluteDays === 1 ? "" : "s"} ${direction}`;
 };
 
 const LIST_PREVIEW_LIMIT = 6;
@@ -114,7 +166,12 @@ const aggregateConfirmedRequestsByBatch = (requests = []) => {
     if (!request) return;
 
     const batchKey = request.BatchId ?? `legacy-${request.ID ?? index}`;
-    const arrivalKey = request.ArrivalDate ?? "unknown-arrival";
+    const arrivalValue =
+      request.ActualArrivalDate ??
+      request.ArrivalDate ??
+      request.PlannedArrivalDate ??
+      null;
+    const arrivalKey = arrivalValue ?? "unknown-arrival";
     const compositeKey = `${batchKey}__${arrivalKey}`;
 
     if (!groups.has(compositeKey)) {
@@ -122,9 +179,12 @@ const aggregateConfirmedRequestsByBatch = (requests = []) => {
         key: compositeKey,
         batchId: request.BatchId ?? null,
         primaryId: request.BatchId ?? request.ID ?? compositeKey,
-        arrivalDate: request.ArrivalDate ?? null,
+        plannedArrivalDate:
+          request.PlannedArrivalDate ?? request.ArrivalDate ?? null,
+        actualArrivalDate: request.ActualArrivalDate ?? null,
         earliestRequestDate: request.RequestDate ?? null,
         importerSet: new Set(),
+        requesterSet: new Set(),
         confirmedBySet: new Set(),
         commentSet: new Set(),
         articles: [],
@@ -141,6 +201,9 @@ const aggregateConfirmedRequestsByBatch = (requests = []) => {
     const group = groups.get(compositeKey);
     if (request.Importer) {
       group.importerSet.add(request.Importer);
+    }
+    if (request.Requester) {
+      group.requesterSet.add(request.Requester);
     }
     if (request.ConfirmedBy) {
       group.confirmedBySet.add(request.ConfirmedBy);
@@ -173,8 +236,15 @@ const aggregateConfirmedRequestsByBatch = (requests = []) => {
       request.RequestDate
     );
 
-    if (!group.arrivalDate && request.ArrivalDate) {
-      group.arrivalDate = request.ArrivalDate;
+    group.plannedArrivalDate = pickEarlierDateValue(
+      group.plannedArrivalDate,
+      request.PlannedArrivalDate ?? request.ArrivalDate ?? null
+    );
+    if (request.ActualArrivalDate) {
+      group.actualArrivalDate = pickEarlierDateValue(
+        group.actualArrivalDate,
+        request.ActualArrivalDate
+      );
     }
   });
 
@@ -182,6 +252,7 @@ const aggregateConfirmedRequestsByBatch = (requests = []) => {
     const importers = Array.from(group.importerSet).filter(Boolean);
     const confirmedBy = Array.from(group.confirmedBySet).filter(Boolean);
     const comments = Array.from(group.commentSet).filter(Boolean);
+    const requesters = Array.from(group.requesterSet).filter(Boolean);
     const importerList =
       importers.length > 0 ? importers : ["Unknown importer"];
 
@@ -189,7 +260,10 @@ const aggregateConfirmedRequestsByBatch = (requests = []) => {
       ID: group.primaryId,
       BatchKey: group.key,
       BatchId: group.batchId,
-      ArrivalDate: group.arrivalDate,
+      ArrivalDate:
+        group.actualArrivalDate ?? group.plannedArrivalDate ?? null,
+      PlannedArrivalDate: group.plannedArrivalDate ?? null,
+      ActualArrivalDate: group.actualArrivalDate ?? null,
       RequestDate: group.earliestRequestDate,
       Importer:
         importerList.length === 1
@@ -207,6 +281,7 @@ const aggregateConfirmedRequestsByBatch = (requests = []) => {
       ConfirmedByList: confirmedBy,
       Comment: comments.join("\n") || null,
       RequestIds: group.requestIds,
+      RequesterList: requesters,
     };
   });
 };
@@ -247,6 +322,10 @@ const CalendarOverview = ({
   title = "Confirmed arrivals overview",
   description,
   sx,
+  allowArrivalUpdates = false,
+  allowRequesterReschedule = false,
+  requesterUsername = null,
+  onRequesterReschedule,
 }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [confirmedRequests, setConfirmedRequests] = useState([]);
@@ -256,6 +335,16 @@ const CalendarOverview = ({
   const [expandedKeys, setExpandedKeys] = useState({});
   const [showAllConfirmed, setShowAllConfirmed] = useState(false);
   const [showAllWms, setShowAllWms] = useState(false);
+  const [activeArrivalBatch, setActiveArrivalBatch] = useState(null);
+  const [arrivalDateInput, setArrivalDateInput] = useState("");
+  const [arrivalDialogFeedback, setArrivalDialogFeedback] = useState(null);
+  const [arrivalDialogSubmitting, setArrivalDialogSubmitting] = useState(false);
+  const [requesterRescheduleBatch, setRequesterRescheduleBatch] =
+    useState(null);
+  const [requesterDateInput, setRequesterDateInput] = useState("");
+  const [requesterDialogFeedback, setRequesterDialogFeedback] = useState(null);
+  const [requesterDialogSubmitting, setRequesterDialogSubmitting] =
+    useState(false);
   const confirmedBatches = useMemo(
     () => aggregateConfirmedRequestsByBatch(confirmedRequests),
     [confirmedRequests]
@@ -303,6 +392,180 @@ const CalendarOverview = ({
     (key) => Boolean(expandedKeys[key]),
     [expandedKeys]
   );
+  const resetArrivalDialog = useCallback(() => {
+    setActiveArrivalBatch(null);
+    setArrivalDateInput("");
+    setArrivalDialogFeedback(null);
+  }, []);
+  const handleCloseArrivalDialog = useCallback(() => {
+    if (arrivalDialogSubmitting) return;
+    resetArrivalDialog();
+  }, [arrivalDialogSubmitting, resetArrivalDialog]);
+  const handleOpenArrivalDialog = useCallback(
+    (batch) => {
+      if (!allowArrivalUpdates || !batch) return;
+      setArrivalDialogFeedback(null);
+      setArrivalDateInput(
+        toDateInputValue(
+          batch.ActualArrivalDate ??
+            batch.ArrivalDate ??
+            batch.PlannedArrivalDate
+        )
+      );
+      setActiveArrivalBatch(batch);
+    },
+    [allowArrivalUpdates]
+  );
+  const handleSubmitArrivalUpdate = useCallback(async () => {
+    if (!activeArrivalBatch) return;
+    if (!arrivalDateInput) {
+      setArrivalDialogFeedback({
+        severity: "error",
+        message: "Please select an arrival date.",
+      });
+      return;
+    }
+    const uniqueRequestIds = (() => {
+      if (
+        Array.isArray(activeArrivalBatch.RequestIds) &&
+        activeArrivalBatch.RequestIds.length > 0
+      ) {
+        return Array.from(
+          new Set(activeArrivalBatch.RequestIds.filter(Boolean))
+        );
+      }
+      if (activeArrivalBatch.ID) {
+        return [activeArrivalBatch.ID];
+      }
+      return [];
+    })();
+    if (uniqueRequestIds.length === 0) {
+      setArrivalDialogFeedback({
+        severity: "error",
+        message: "We couldn't determine which request to update.",
+      });
+      return;
+    }
+    try {
+      setArrivalDialogSubmitting(true);
+      setArrivalDialogFeedback(null);
+      await Promise.all(
+        uniqueRequestIds.map((requestId) =>
+          API.patch(`/imports/${requestId}`, {
+            actualArrivalDate: arrivalDateInput,
+          })
+        )
+      );
+      const parsed = new Date(arrivalDateInput);
+      if (!Number.isNaN(parsed.getTime())) {
+        setSelectedDate(parsed);
+      }
+      resetArrivalDialog();
+      await loadRequests();
+    } catch (error) {
+      setArrivalDialogFeedback({
+        severity: "error",
+        message:
+          error?.response?.data?.message ??
+          "We couldn't update the arrival date. Please try again.",
+      });
+    } finally {
+      setArrivalDialogSubmitting(false);
+    }
+  }, [
+    activeArrivalBatch,
+    arrivalDateInput,
+    loadRequests,
+    resetArrivalDialog,
+  ]);
+  const resetRequesterDialog = useCallback(() => {
+    setRequesterRescheduleBatch(null);
+    setRequesterDateInput("");
+    setRequesterDialogFeedback(null);
+  }, []);
+  const handleCloseRequesterDialog = useCallback(() => {
+    if (requesterDialogSubmitting) return;
+    resetRequesterDialog();
+  }, [requesterDialogSubmitting, resetRequesterDialog]);
+  const handleOpenRequesterDialog = useCallback(
+    (batch) => {
+      if (!allowRequesterReschedule || !batch) return;
+      setRequesterDialogFeedback(null);
+      setRequesterDateInput(
+        toDateInputValue(batch.PlannedArrivalDate ?? batch.ArrivalDate)
+      );
+      setRequesterRescheduleBatch(batch);
+    },
+    [allowRequesterReschedule]
+  );
+  const handleSubmitRequesterReschedule = useCallback(async () => {
+    if (!requesterRescheduleBatch) return;
+    if (!requesterDateInput) {
+      setRequesterDialogFeedback({
+        severity: "error",
+        message: "Please select a new arrival date.",
+      });
+      return;
+    }
+    const requestIds = (() => {
+      if (
+        Array.isArray(requesterRescheduleBatch.RequestIds) &&
+        requesterRescheduleBatch.RequestIds.length > 0
+      ) {
+        return Array.from(
+          new Set(requesterRescheduleBatch.RequestIds.filter(Boolean))
+        );
+      }
+      if (requesterRescheduleBatch.ID) {
+        return [requesterRescheduleBatch.ID];
+      }
+      return [];
+    })();
+
+    if (requestIds.length === 0) {
+      setRequesterDialogFeedback({
+        severity: "error",
+        message: "We couldn't determine which request to update.",
+      });
+      return;
+    }
+
+    try {
+      setRequesterDialogSubmitting(true);
+      setRequesterDialogFeedback(null);
+      await Promise.all(
+        requestIds.map((requestId) =>
+          API.patch(`/imports/${requestId}/requester-arrival`, {
+            arrivalDate: requesterDateInput,
+          })
+        )
+      );
+      const parsed = new Date(requesterDateInput);
+      if (!Number.isNaN(parsed.getTime())) {
+        setSelectedDate(parsed);
+      }
+      resetRequesterDialog();
+      await loadRequests();
+      if (typeof onRequesterReschedule === "function") {
+        onRequesterReschedule();
+      }
+    } catch (error) {
+      setRequesterDialogFeedback({
+        severity: "error",
+        message:
+          error?.response?.data?.message ??
+          "We couldn't update the arrival date. Please try again.",
+      });
+    } finally {
+      setRequesterDialogSubmitting(false);
+    }
+  }, [
+    loadRequests,
+    onRequesterReschedule,
+    requesterDateInput,
+    requesterRescheduleBatch,
+    resetRequesterDialog,
+  ]);
   const confirmedByDate = useMemo(() => {
     const grouped = new Map();
     confirmedBatches.forEach((request) => {
@@ -603,7 +866,8 @@ const CalendarOverview = ({
     );
   };
   return (
-    <Paper
+    <>
+      <Paper
       elevation={12}
       sx={{
         p: { xs: 3, md: 5 },
@@ -766,14 +1030,18 @@ const CalendarOverview = ({
                   return format(parsed, "MMMM d, yyyy");
                 })();
 
-                const arrivalDate = (() => {
-                  if (!batch.ArrivalDate) return "N/A";
-                  const parsed = new Date(batch.ArrivalDate);
-                  if (Number.isNaN(parsed.getTime())) {
-                    return batch.ArrivalDate;
-                  }
-                  return format(parsed, "MMMM d, yyyy");
-                })();
+                const actualArrivalDateLabel = formatLongDate(
+                  batch.ActualArrivalDate
+                );
+                const plannedArrivalDateLabel = formatLongDate(
+                  batch.PlannedArrivalDate
+                );
+                const resolvedArrivalLabel =
+                  formatLongDate(batch.ArrivalDate) ?? "N/A";
+                const varianceLabel = describeArrivalVariance(
+                  batch.PlannedArrivalDate,
+                  batch.ActualArrivalDate
+                );
 
                 const articleDetails = Array.isArray(batch.ArticleDetails)
                   ? batch.ArticleDetails
@@ -793,9 +1061,31 @@ const CalendarOverview = ({
                     ? `Articles: ${formatNumeric(resolvedArticleCount)}`
                     : null;
                 const hasMultipleArticles = resolvedArticleCount > 1;
+                const requestIdTargets = Array.isArray(batch.RequestIds)
+                  ? batch.RequestIds.filter(Boolean)
+                  : [];
+                const canEditArrival =
+                  allowArrivalUpdates &&
+                  (requestIdTargets.length > 0 || Boolean(batch.ID));
+                const canRequesterReschedule =
+                  allowRequesterReschedule &&
+                  !batch.ActualArrivalDate &&
+                  requesterUsername &&
+                  Array.isArray(batch.RequesterList) &&
+                  batch.RequesterList.includes(requesterUsername) &&
+                  (requestIdTargets.length > 0 || Boolean(batch.ID));
 
                 const chipItems = [
-                  arrivalDate && `Arrival: ${arrivalDate}`,
+                  actualArrivalDateLabel
+                    ? `Actual: ${actualArrivalDateLabel}`
+                    : resolvedArrivalLabel &&
+                      `Arrival: ${resolvedArrivalLabel}`,
+                  plannedArrivalDateLabel &&
+                  (!actualArrivalDateLabel ||
+                    actualArrivalDateLabel !== plannedArrivalDateLabel)
+                    ? `Planned: ${plannedArrivalDateLabel}`
+                    : null,
+                  varianceLabel && `Variance: ${varianceLabel}`,
                   batchLabel ? `Batch: ${batchLabel}` : null,
                   articleCountLabel,
                   Number.isFinite(Number(batch.BoxCount))
@@ -964,19 +1254,42 @@ const CalendarOverview = ({
                                   ? "Hide details"
                                   : "Full metrics"}
                               </Button>
-                              <Collapse in={isExpanded(detailKey)}>
-                                {renderDetailRows(detailItems, {
-                                  comment: batch.Comment,
-                                  commentLabel: "Note",
-                                })}
-                              </Collapse>
-                            </>
-                          )}
-                        </Stack>
-                      }
-                    />
-                  </ListItem>
-                );
+                          <Collapse in={isExpanded(detailKey)}>
+                            {renderDetailRows(detailItems, {
+                              comment: batch.Comment,
+                              commentLabel: "Note",
+                            })}
+                          </Collapse>
+                        </>
+                      )}
+                      {canEditArrival && (
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="outlined"
+                          color="secondary"
+                          onClick={() => handleOpenArrivalDialog(batch)}
+                          sx={{ alignSelf: "flex-start" }}
+                        >
+                          Actual arrival date
+                        </Button>
+                      )}
+                      {canRequesterReschedule && (
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handleOpenRequesterDialog(batch)}
+                          sx={{ alignSelf: "flex-start" }}
+                        >
+                          Reschedule arrival
+                        </Button>
+                      )}
+                    </Stack>
+                  }
+                />
+              </ListItem>
+            );
               })}
             </List>
             {eventsForSelectedDate.confirmed.length > LIST_PREVIEW_LIMIT && (
@@ -1265,7 +1578,133 @@ const CalendarOverview = ({
           </Stack>
         )}
       </Stack>
-    </Paper>
+      </Paper>
+      {allowArrivalUpdates && (
+        <Dialog
+          open={Boolean(activeArrivalBatch)}
+          onClose={handleCloseArrivalDialog}
+          fullWidth
+          maxWidth="xs"
+        >
+          <DialogTitle>Set actual arrival date</DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={2}>
+              {activeArrivalBatch && (
+                <Stack spacing={0.75}>
+                  <Typography variant="body2" color="text.secondary">
+                    Update the arrival for{" "}
+                    <Typography
+                      component="span"
+                      fontWeight={600}
+                      color="text.primary"
+                    >
+                      {activeArrivalBatch.Importer ?? "this import"}
+                    </Typography>
+                    . This change is visible to all teams.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Planned arrival:{" "}
+                    {formatLongDate(activeArrivalBatch.PlannedArrivalDate) ??
+                      "N/A"}
+                  </Typography>
+                  {activeArrivalBatch.ActualArrivalDate && (
+                    <Typography variant="body2" color="text.secondary">
+                      Current actual:{" "}
+                      {formatLongDate(activeArrivalBatch.ActualArrivalDate)}
+                    </Typography>
+                  )}
+                </Stack>
+              )}
+              {arrivalDialogFeedback && (
+                <Alert severity={arrivalDialogFeedback.severity}>
+                  {arrivalDialogFeedback.message}
+                </Alert>
+              )}
+              <TextField
+                label="Actual arrival date"
+                type="date"
+                value={arrivalDateInput}
+                onChange={(event) => setArrivalDateInput(event.target.value)}
+                InputLabelProps={{ shrink: true }}
+                required
+                fullWidth
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, py: 2.5 }}>
+            <Button onClick={handleCloseArrivalDialog} disabled={arrivalDialogSubmitting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitArrivalUpdate}
+              disabled={arrivalDialogSubmitting}
+              variant="contained"
+              color="secondary"
+            >
+              {arrivalDialogSubmitting ? "Saving..." : "Save"}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+      {allowRequesterReschedule && (
+        <Dialog
+          open={Boolean(requesterRescheduleBatch)}
+          onClose={handleCloseRequesterDialog}
+          fullWidth
+          maxWidth="xs"
+        >
+          <DialogTitle>Reschedule planned arrival</DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={2}>
+              {requesterRescheduleBatch && (
+                <Typography variant="body2" color="text.secondary">
+                  Update the planned arrival for{" "}
+                  <Typography
+                    component="span"
+                    fontWeight={600}
+                    color="text.primary"
+                  >
+                    {requesterRescheduleBatch.Importer ?? "this import"}
+                  </Typography>
+                  . This will move every article in the batch back to pending
+                  confirmation.
+                </Typography>
+              )}
+              {requesterDialogFeedback && (
+                <Alert severity={requesterDialogFeedback.severity}>
+                  {requesterDialogFeedback.message}
+                </Alert>
+              )}
+              <TextField
+                label="New planned arrival date"
+                type="date"
+                value={requesterDateInput}
+                onChange={(event) => setRequesterDateInput(event.target.value)}
+                InputLabelProps={{ shrink: true }}
+                required
+                fullWidth
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, py: 2.5 }}>
+            <Button
+              onClick={handleCloseRequesterDialog}
+              disabled={requesterDialogSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitRequesterReschedule}
+              disabled={requesterDialogSubmitting}
+              variant="contained"
+              color="secondary"
+            >
+              {requesterDialogSubmitting ? "Saving..." : "Save"}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+    </>
   );
 };
 

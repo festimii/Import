@@ -575,7 +575,11 @@ export default function ConfirmerDashboard() {
             </Stack>
           </SectionCard>
 
-          <CalendarOverview title="Calendar overview" description="" />
+          <CalendarOverview
+            title="Calendar overview"
+            description=""
+            allowArrivalUpdates
+          />
         </Stack>
       </Container>
 

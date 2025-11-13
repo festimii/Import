@@ -382,6 +382,18 @@ const mapArticles = (records) =>
       }
     }
 
+    const rawArrival = mapped.ArrivalDate ?? null;
+    const plannedArrival =
+      mapped.PlannedArrivalDate ?? rawArrival ?? null;
+    if (mapped.PlannedArrivalDate === undefined) {
+      mapped.PlannedArrivalDate = plannedArrival;
+    }
+    if (mapped.ActualArrivalDate === undefined) {
+      mapped.ActualArrivalDate = null;
+    }
+    mapped.ArrivalDate =
+      mapped.ActualArrivalDate ?? plannedArrival ?? rawArrival ?? null;
+
     return mapped;
   });
 
@@ -713,6 +725,7 @@ const ensureImportRequestEnhancements = () => {
       const batchColumn = "BatchId";
       const batchConstraint = "DF_ImportRequests_BatchId";
       const articleNameColumn = "ArticleName";
+      const actualArrivalColumn = "ActualArrivalDate";
 
       const ensureBatchColumn = async () => {
         const hasBatchColumn = await columnExists(
@@ -760,6 +773,21 @@ const ensureImportRequestEnhancements = () => {
             .request()
             .query(
               `ALTER TABLE ${importTable} ADD ${articleNameColumn} NVARCHAR(255) NULL;`
+            );
+        }
+      };
+
+      const ensureActualArrivalColumn = async () => {
+        const hasActualArrival = await columnExists(
+          pool,
+          importTable,
+          actualArrivalColumn
+        );
+        if (!hasActualArrival) {
+          await pool
+            .request()
+            .query(
+              `ALTER TABLE ${importTable} ADD ${actualArrivalColumn} DATETIME NULL;`
             );
         }
       };
@@ -884,6 +912,7 @@ const ensureImportRequestEnhancements = () => {
 
       await ensureBatchColumn();
       await ensureArticleNameColumn();
+      await ensureActualArrivalColumn();
       await ensureDetailsTable();
     })();
 
@@ -1244,7 +1273,8 @@ const insertImportRequestItems = async ({
             )
             OUTPUT INSERTED.ID,
                    INSERTED.DataKerkeses AS RequestDate,
-                   INSERTED.DataArritjes AS ArrivalDate,
+                   INSERTED.DataArritjes AS PlannedArrivalDate,
+                   INSERTED.ActualArrivalDate,
                    INSERTED.Importuesi AS Importer,
                    INSERTED.Artikulli AS Article,
                    INSERTED.ArticleName AS ArticleName,
@@ -1746,6 +1776,60 @@ router.post(
     }
   }
 );
+
+router.get(
+  "/mine",
+  verifyRole(["requester"]),
+  async (req, res) => {
+    try {
+      const { hasBatchId } = await getImportRequestFeatureState();
+      const batchProjection = hasBatchId
+        ? ", BatchId"
+        : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
+      const pool = await poolPromise;
+      const result = await pool
+        .request()
+        .input("Requester", req.user.username)
+        .query(`SELECT ID,
+                       DataKerkeses AS RequestDate,
+                       DataArritjes AS PlannedArrivalDate,
+                       ActualArrivalDate,
+                       Importuesi AS Importer,
+                       Artikulli AS Article,
+                       ArticleName,
+                       NumriPakove AS BoxCount,
+                       NumriPaletave AS PalletCount,
+                       BoxesPerPallet,
+                       BoxesPerLayer,
+                       LayersPerPallet,
+                       FullPallets,
+                       RemainingBoxes,
+                       PalletWeightKg,
+                       PalletVolumeM3,
+                       BoxWeightKg,
+                       BoxVolumeM3,
+                       PalletVolumeUtilization,
+                       WeightFullPalletsKg,
+                       VolumeFullPalletsM3,
+                       WeightRemainingKg,
+                       VolumeRemainingM3,
+                       TotalShipmentWeightKg,
+                       TotalShipmentVolumeM3,
+                       Comment,
+                       Useri AS Requester,
+                       Status,
+                       ConfirmedBy,
+                       CreatedAt${batchProjection}
+                FROM ImportRequests
+                WHERE Useri = @Requester
+                ORDER BY CreatedAt DESC`);
+      res.json(mapArticles(result.recordset));
+    } catch (err) {
+      console.error("Fetch requester imports error:", err.message);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 // ---------- GET PENDING REQUESTS (Confirmer) ----------
 router.get("/", verifyRole(["confirmer"]), async (req, res) => {
   try {
@@ -1756,7 +1840,8 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
     const pool = await poolPromise;
     const result = await pool.request().query(`SELECT ID,
                      DataKerkeses AS RequestDate,
-                     DataArritjes AS ArrivalDate,
+                     DataArritjes AS PlannedArrivalDate,
+                     ActualArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
                      ArticleName,
@@ -1806,7 +1891,8 @@ router.get(
       const pool = await poolPromise;
       const result = await pool.request().query(`SELECT ID,
                      DataKerkeses AS RequestDate,
-                     DataArritjes AS ArrivalDate,
+                     DataArritjes AS PlannedArrivalDate,
+                     ActualArrivalDate,
                      Importuesi AS Importer,
                      Artikulli AS Article,
                      ArticleName,
@@ -1859,7 +1945,8 @@ router.get(
       const [confirmedResult, wmsResult] = await Promise.all([
         pool.request().query(`SELECT ID,
                          DataKerkeses AS RequestDate,
-                         DataArritjes AS ArrivalDate,
+                         DataArritjes AS PlannedArrivalDate,
+                         ActualArrivalDate,
                          Importuesi AS Importer,
                          Artikulli AS Article,
                          ArticleName,
@@ -2261,11 +2348,150 @@ router.get(
   }
 );
 
+router.patch(
+  "/:id/requester-arrival",
+  verifyRole(["requester"]),
+  async (req, res) => {
+    const { arrivalDate } = req.body;
+
+    if (!arrivalDate) {
+      return res
+        .status(400)
+        .json({ message: "An arrival date is required to update the request." });
+    }
+
+    try {
+      const arrivalDateValue = new Date(arrivalDate);
+      if (Number.isNaN(arrivalDateValue.getTime())) {
+        return res
+          .status(400)
+          .json({ message: "Invalid arrival date provided." });
+      }
+      const arrivalDateSqlValue = arrivalDateValue.toISOString().split("T")[0];
+      const { hasBatchId } = await getImportRequestFeatureState();
+      const batchOutput = hasBatchId ? ", INSERTED.BatchId" : "";
+      const pool = await poolPromise;
+      const existingResult = await pool
+        .request()
+        .input("ID", req.params.id)
+        .input("Requester", req.user.username)
+        .query(
+          `SELECT ID,
+                  Importuesi AS Importer,
+                  Artikulli AS Article,
+                  ArticleName,
+                  Status AS CurrentStatus,
+                  DataArritjes AS CurrentArrivalDate,
+                  ActualArrivalDate AS CurrentActualArrivalDate
+           FROM ImportRequests
+           WHERE ID = @ID
+             AND Useri = @Requester`
+        );
+
+      if (existingResult.recordset.length === 0) {
+        return res.status(404).json({ message: "Import request not found." });
+      }
+
+      const existing = existingResult.recordset[0];
+
+      if (existing.CurrentActualArrivalDate) {
+        return res.status(400).json({
+          message:
+            "This import already has an actual arrival date and can no longer be updated.",
+        });
+      }
+
+      const updateResult = await pool
+        .request()
+        .input("ID", req.params.id)
+        .input("Requester", req.user.username)
+        .input("ArrivalDate", arrivalDateSqlValue)
+        .query(`UPDATE ImportRequests
+                SET DataArritjes = @ArrivalDate,
+                    Status = 'pending',
+                    ConfirmedBy = NULL
+                OUTPUT INSERTED.ID,
+                       INSERTED.DataKerkeses AS RequestDate,
+                       INSERTED.DataArritjes AS PlannedArrivalDate,
+                       INSERTED.ActualArrivalDate,
+                       INSERTED.Importuesi AS Importer,
+                       INSERTED.Artikulli AS Article,
+                       INSERTED.ArticleName AS ArticleName,
+                       INSERTED.NumriPakove AS BoxCount,
+                       INSERTED.NumriPaletave AS PalletCount,
+                       INSERTED.BoxesPerPallet,
+                       INSERTED.BoxesPerLayer,
+                       INSERTED.LayersPerPallet,
+                       INSERTED.FullPallets,
+                       INSERTED.RemainingBoxes,
+                       INSERTED.PalletWeightKg,
+                       INSERTED.PalletVolumeM3,
+                       INSERTED.BoxWeightKg,
+                       INSERTED.BoxVolumeM3,
+                       INSERTED.PalletVolumeUtilization,
+                       INSERTED.WeightFullPalletsKg,
+                       INSERTED.VolumeFullPalletsM3,
+                       INSERTED.WeightRemainingKg,
+                       INSERTED.VolumeRemainingM3,
+                       INSERTED.TotalShipmentWeightKg,
+                       INSERTED.TotalShipmentVolumeM3,
+                       INSERTED.Comment,
+                       INSERTED.Useri AS Requester,
+                       INSERTED.Status,
+                       INSERTED.ConfirmedBy,
+                       INSERTED.CreatedAt${batchOutput}
+                WHERE ID = @ID
+                  AND Useri = @Requester`);
+
+      if (updateResult.recordset.length === 0) {
+        return res.status(404).json({ message: "Import request not found." });
+      }
+
+      const [record] = mapArticles(updateResult.recordset);
+      const previousDateLabel = formatNotificationDate(
+        existing.CurrentArrivalDate
+      );
+      const newDateLabel = formatNotificationDate(arrivalDateSqlValue);
+      const updateMessage = previousDateLabel
+        ? `Requester ${req.user.username} updated the planned arrival for request ${record.ID} from ${previousDateLabel} to ${newDateLabel}. Confirmation is required again.`
+        : `Requester ${req.user.username} set the planned arrival for request ${record.ID} to ${newDateLabel}. Confirmation is required again.`;
+
+      try {
+        await dispatchNotificationEvent(pool, {
+          requestId: record.ID,
+          message: updateMessage,
+          type: "requester_arrival_update",
+          roles: ["admin", "confirmer"],
+          excludeUsername: req.user.username,
+          push: {
+            title: "Arrival date changed",
+            body: updateMessage,
+            data: { intent: "requester_arrival_update" },
+            tag: `request-${record.ID}-requester-arrival`,
+          },
+        });
+      } catch (notificationError) {
+        console.error(
+          "Requester arrival update notification error:",
+          notificationError?.message || notificationError
+        );
+      }
+
+      res.json(record);
+    } catch (error) {
+      console.error("Requester arrival update error:", error);
+      res.status(500).json({
+        message: "Failed to update the arrival date. Please try again.",
+      });
+    }
+  }
+);
+
 // ---------- APPROVE/REJECT REQUEST ----------
 router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
-  const { status, arrivalDate } = req.body;
+  const { status, arrivalDate, actualArrivalDate } = req.body;
 
-  if (!status && !arrivalDate) {
+  if (!status && !arrivalDate && !actualArrivalDate) {
     return res
       .status(400)
       .json({ message: "No updates were provided for this request." });
@@ -2279,7 +2505,10 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       .request()
       .input("ID", req.params.id)
       .query(
-        `SELECT DataArritjes AS CurrentArrivalDate, Useri AS Requester, Status AS CurrentStatus
+        `SELECT DataArritjes AS CurrentArrivalDate,
+                ActualArrivalDate AS CurrentActualArrivalDate,
+                Useri AS Requester,
+                Status AS CurrentStatus
          FROM ImportRequests
          WHERE ID = @ID`
       );
@@ -2290,6 +2519,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
 
     const {
       CurrentArrivalDate,
+      CurrentActualArrivalDate,
       Requester: requesterUsername,
       CurrentStatus,
     } = existingResult.recordset[0];
@@ -2303,6 +2533,18 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
           .json({ message: "Invalid arrival date provided." });
       }
       arrivalDateSqlValue = arrivalDateValue.toISOString().split("T")[0];
+    }
+
+    let actualArrivalDateSqlValue;
+    if (actualArrivalDate) {
+      const actualArrivalDateValue = new Date(actualArrivalDate);
+      if (Number.isNaN(actualArrivalDateValue.getTime())) {
+        return res
+          .status(400)
+          .json({ message: "Invalid actual arrival date provided." });
+      }
+      actualArrivalDateSqlValue =
+        actualArrivalDateValue.toISOString().split("T")[0];
     }
 
     const updateRequest = pool
@@ -2322,6 +2564,11 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       setClauses.push("DataArritjes = @DataArritjes");
     }
 
+    if (actualArrivalDateSqlValue) {
+      updateRequest.input("ActualArrivalDate", actualArrivalDateSqlValue);
+      setClauses.push("ActualArrivalDate = @ActualArrivalDate");
+    }
+
     if (setClauses.length === 1) {
       return res
         .status(400)
@@ -2332,7 +2579,8 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
             SET ${setClauses.join(", ")}
             OUTPUT INSERTED.ID,
                    INSERTED.DataKerkeses AS RequestDate,
-                   INSERTED.DataArritjes AS ArrivalDate,
+                   INSERTED.DataArritjes AS PlannedArrivalDate,
+                   INSERTED.ActualArrivalDate,
                    INSERTED.Importuesi AS Importer,
                    INSERTED.Artikulli AS Article,
                    INSERTED.ArticleName AS ArticleName,
@@ -2387,6 +2635,30 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         notificationsToDispatch.push({
           message,
           type: "arrival_date_change",
+          roles: defaultNotificationRoles,
+          usernames: requesterAudience,
+        });
+      }
+    }
+    if (actualArrivalDateSqlValue) {
+      const previousActualDate = (() => {
+        if (!CurrentActualArrivalDate) return null;
+        const parsed = new Date(CurrentActualArrivalDate);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed.toISOString().split("T")[0];
+      })();
+
+      if (!previousActualDate || previousActualDate !== actualArrivalDateSqlValue) {
+        const requesterContext = requesterUsername
+          ? ` (requested by ${requesterUsername})`
+          : "";
+        const message = previousActualDate
+          ? `Actual arrival date${requesterContext} updated from ${previousActualDate} to ${actualArrivalDateSqlValue} by ${req.user.username}.`
+          : `Actual arrival date${requesterContext} recorded as ${actualArrivalDateSqlValue} by ${req.user.username}.`;
+
+        notificationsToDispatch.push({
+          message,
+          type: "actual_arrival_date_change",
           roles: defaultNotificationRoles,
           usernames: requesterAudience,
         });
