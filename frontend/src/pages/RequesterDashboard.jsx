@@ -276,6 +276,21 @@ const getStatusChipColor = (status, isMixed) => {
   return STATUS_COLOR_MAP[status] ?? "default";
 };
 
+const sanitizeGuid = (value) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.replace(/[{}]/g, "").trim();
+  if (!trimmed || trimmed.toLowerCase() === "null") {
+    return null;
+  }
+  if (/^[0-9a-fA-F]{32}$/.test(trimmed)) {
+    return `${trimmed.slice(0, 8)}-${trimmed.slice(8, 12)}-${trimmed.slice(
+      12,
+      16
+    )}-${trimmed.slice(16, 20)}-${trimmed.slice(20)}`;
+  }
+  return trimmed;
+};
+
 const formatBatchLabel = (value) => {
   if (!value || typeof value !== "string") {
     return null;
@@ -574,7 +589,8 @@ export default function RequesterDashboard() {
   };
 
   const handleDeleteGroup = async (group) => {
-    if (!group?.batchId) {
+    const sanitizedBatchId = sanitizeGuid(group?.batchId);
+    if (!sanitizedBatchId) {
       setSubmittedFeedback({
         severity: "warning",
         message: "Kjo porosi nuk mbështet fshirjen.",
@@ -589,15 +605,19 @@ export default function RequesterDashboard() {
       return;
     }
 
-    setDeletingBatchId(group.batchId);
+    setDeletingBatchId(sanitizedBatchId);
     try {
-      await API.delete(`/imports/batch/${group.batchId}`);
+      await API.delete(`/imports/batch/${sanitizedBatchId}`);
       setSubmittedFeedback({
         severity: "success",
         message: "Porosia u fshi me sukses.",
       });
       await loadSubmittedRequests();
-      if (editingSubmission?.batchId === group.batchId) {
+      if (
+        editingSubmission?.batchId &&
+        sanitizeGuid(editingSubmission.batchId)?.toLowerCase() ===
+          sanitizedBatchId.toLowerCase()
+      ) {
         resetFormState();
       }
     } catch (error) {
@@ -757,13 +777,24 @@ export default function RequesterDashboard() {
     setFormSubmitting(true);
 
     try {
-      if (isEditingSubmission) {
-        await API.put(`/imports/batch/${editingSubmission.batchId}`, {
-          requestDate: editingSubmission.requestDate ?? currentDate,
-          arrivalDate,
-          importer: importerValue,
-          comment,
-          items: preparedItems,
+    if (isEditingSubmission) {
+      const sanitizedBatchId = sanitizeGuid(editingSubmission.batchId);
+      if (!sanitizedBatchId) {
+        setFeedback({
+          severity: "error",
+          message:
+            "Nuk mund të gjejmë këtë porosi për përditësim. Rifreskoni faqen dhe provoni përsëri.",
+        });
+        setFormSubmitting(false);
+        return;
+      }
+
+      await API.put(`/imports/batch/${sanitizedBatchId}`, {
+        requestDate: editingSubmission.requestDate ?? currentDate,
+        arrivalDate,
+        importer: importerValue,
+        comment,
+        items: preparedItems,
         });
 
         setFeedback({
@@ -1064,9 +1095,15 @@ export default function RequesterDashboard() {
 
   const findGroupByBatchId = (batchId) => {
     if (!batchId) return null;
-    return groupedSubmissions.find(
-      (group) => group.batchId && group.batchId === batchId
-    );
+    const normalized = sanitizeGuid(batchId);
+    if (!normalized) {
+      return null;
+    }
+    return groupedSubmissions.find((group) => {
+      if (!group.batchId) return false;
+      return sanitizeGuid(group.batchId)?.toLowerCase() ===
+        normalized.toLowerCase();
+    });
   };
 
   const handleCalendarEditBatch = (batch) => {

@@ -196,11 +196,35 @@ const describeStatusInAlbanian = (status) => {
   }
 };
 
+const GUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 const isValidGuid = (value) =>
-  typeof value === "string" &&
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(
-    value.trim()
-  );
+  typeof value === "string" && GUID_REGEX.test(value.toLowerCase());
+
+const normalizeGuidInput = (value) => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim().replace(/[{}]/g, "");
+  if (!trimmed) {
+    return null;
+  }
+  const compact = trimmed.toLowerCase();
+  if (isValidGuid(compact)) {
+    return compact;
+  }
+  if (/^[0-9a-f]{32}$/.test(compact)) {
+    const formatted = `${compact.slice(0, 8)}-${compact.slice(
+      8,
+      12
+    )}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(
+      20
+    )}`;
+    return isValidGuid(formatted) ? formatted : null;
+  }
+  return null;
+};
 
 const describeActionDetails = (action, metadata = {}) => {
   switch (action) {
@@ -3011,12 +3035,12 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
   }
 });
 
-export default router;
 router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
-  const { batchId } = req.params;
-  if (!isValidGuid(batchId)) {
+  const normalizedBatchId = normalizeGuidInput(req.params.batchId);
+  if (!isValidGuid(normalizedBatchId)) {
     return res.status(400).json({ message: "Batch ID i pavlefshëm." });
   }
+  const batchId = normalizedBatchId;
 
   const { importer, arrivalDate, requestDate, comment, items } = req.body || {};
   const importerValue = trimString(importer);
@@ -3046,7 +3070,9 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
   const existingResult = await pool
     .request()
     .input("BatchId", sql.UniqueIdentifier, batchId)
-    .query(`SELECT TOP 1 Requester, RequestDate, PlannedArrivalDate
+    .query(`SELECT TOP 1 Useri AS Requester,
+                    DataKerkeses AS RequestDate,
+                    DataArritjes AS PlannedArrivalDate
             FROM dbo.ImportRequests
             WHERE BatchId = @BatchId`);
 
@@ -3161,17 +3187,24 @@ router.delete(
   "/batch/:batchId",
   verifyRole(["requester"]),
   async (req, res) => {
-    const { batchId } = req.params;
-    if (!isValidGuid(batchId)) {
+    const normalizedBatchId = normalizeGuidInput(req.params.batchId);
+    if (!isValidGuid(normalizedBatchId)) {
       return res.status(400).json({ message: "Batch ID i pavlefshëm." });
     }
+    const batchId = normalizedBatchId;
 
     const pool = await poolPromise;
     const existingRecordsResult = await pool
       .request()
       .input("BatchId", sql.UniqueIdentifier, batchId)
       .query(
-        `SELECT ID, Requester, Status, Importer, Comment, RequestDate, PlannedArrivalDate
+        `SELECT ID,
+                Useri AS Requester,
+                Status,
+                Importuesi AS Importer,
+                Comment,
+                DataKerkeses AS RequestDate,
+                DataArritjes AS PlannedArrivalDate
          FROM dbo.ImportRequests
          WHERE BatchId = @BatchId`
       );
@@ -3244,3 +3277,5 @@ router.delete(
     res.json({ deleted: existingRecordsResult.recordset.length });
   }
 );
+
+export default router;

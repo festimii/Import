@@ -333,6 +333,10 @@ const CalendarOverview = ({
   requesterEditBatchId,
   requesterDeleteBatchId,
 }) => {
+  const normalizeBatchId = (value) =>
+    typeof value === "string"
+      ? value.replace(/[{}]/g, "").trim().toLowerCase()
+      : null;
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [confirmedRequests, setConfirmedRequests] = useState([]);
   const [wmsOrders, setWmsOrders] = useState([]);
@@ -1087,13 +1091,15 @@ const CalendarOverview = ({
                   Array.isArray(batch.RequesterList) &&
                   batch.RequesterList.includes(requesterUsername);
                 const requesterEditInFlight =
-                  requesterEditBatchId &&
+                  normalizeBatchId(requesterEditBatchId) &&
                   batch.BatchId &&
-                  requesterEditBatchId === batch.BatchId;
+                  normalizeBatchId(requesterEditBatchId) ===
+                    normalizeBatchId(batch.BatchId);
                 const requesterDeleteInFlight =
-                  requesterDeleteBatchId &&
+                  normalizeBatchId(requesterDeleteBatchId) &&
                   batch.BatchId &&
-                  requesterDeleteBatchId === batch.BatchId;
+                  normalizeBatchId(requesterDeleteBatchId) ===
+                    normalizeBatchId(batch.BatchId);
 
                 const chipItems = [
                   actualArrivalDateLabel
