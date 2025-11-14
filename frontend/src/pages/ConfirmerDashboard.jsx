@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -20,7 +20,6 @@ import { alpha } from "@mui/material/styles";
 import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
 import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
-import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import ViewInArRoundedIcon from "@mui/icons-material/ViewInArRounded";
 import API from "../api";
@@ -29,8 +28,7 @@ import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
-import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
-import NotificationCenter from "../components/NotificationCenter";
+import NotificationMenu from "../components/NotificationMenu";
 
 const formatNumeric = (value, fractionDigits = 0) => {
   if (value === null || value === undefined) {
@@ -55,9 +53,6 @@ export default function ConfirmerDashboard() {
   const [proposalDate, setProposalDate] = useState("");
   const [proposalSubmitting, setProposalSubmitting] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState(null);
-  const notificationCenterRef = useRef(null);
-  const [notificationsLoading, setNotificationsLoading] = useState(true);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
   const loadRequests = async () => {
@@ -361,97 +356,21 @@ export default function ConfirmerDashboard() {
       <PageHero
         title="VIVA Fresh Imports Tracker"
         subtitle=""
-        actions={
-          <Button variant="contained" color="secondary" onClick={logout}>
+        actions={[
+          <NotificationMenu key="notifications" />,
+          <Button
+            key="logout"
+            variant="contained"
+            color="secondary"
+            onClick={logout}
+          >
             Logout
-          </Button>
-        }
+          </Button>,
+        ]}
       ></PageHero>
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <SectionCard
-            title="Notifications"
-            description="Stay aligned with approvals, comments and scheduling updates."
-            action={
-              <Button
-                type="button"
-                variant="contained"
-                color="secondary"
-                size="small"
-                startIcon={<AutorenewRoundedIcon />}
-                onClick={() => notificationCenterRef.current?.reload()}
-                disabled={notificationsLoading}
-              >
-                {notificationsLoading ? "Refreshing..." : "Refresh feed"}
-              </Button>
-            }
-            secondaryAction={
-              <Chip
-                label={
-                  notificationsLoading
-                    ? "Loading notifications"
-                    : unreadNotifications > 0
-                    ? `${unreadNotifications} unread`
-                    : "All caught up"
-                }
-                color={unreadNotifications > 0 ? "warning" : "success"}
-                variant="outlined"
-              />
-            }
-            sx={{
-              background: (theme) =>
-                `linear-gradient(135deg, ${alpha(
-                  theme.palette.info.light,
-                  0.08
-                )} 0%, ${alpha(theme.palette.info.main, 0.05)} 100%)`,
-            }}
-          >
-            <Stack spacing={2.5}>
-              <Alert
-                icon={<NotificationsActiveRoundedIcon fontSize="inherit" />}
-                severity={unreadNotifications > 0 ? "info" : "success"}
-                variant="outlined"
-                sx={{
-                  borderRadius: 3,
-                  backgroundColor: (theme) =>
-                    alpha(
-                      unreadNotifications > 0
-                        ? theme.palette.info.light
-                        : theme.palette.success.light,
-                      0.08
-                    ),
-                }}
-              >
-                {unreadNotifications > 0
-                  ? `You have ${unreadNotifications} unread notification${
-                      unreadNotifications === 1 ? "" : "s"
-                    }.`
-                  : "You're up to date with the latest changes."}
-              </Alert>
-              <NotificationPermissionBanner
-                onEnabled={() => notificationCenterRef.current?.reload()}
-              />
-              <Paper
-                elevation={0}
-                variant="outlined"
-                sx={{
-                  borderRadius: 3,
-                  p: { xs: 2, md: 3 },
-                  backgroundColor: (theme) =>
-                    alpha(theme.palette.background.default, 0.75),
-                }}
-              >
-                <NotificationCenter
-                  ref={notificationCenterRef}
-                  onUnreadCountChange={setUnreadNotifications}
-                  onLoadingChange={setNotificationsLoading}
-                  description=""
-                  emptyMessage="You're caught up with the latest updates."
-                />
-              </Paper>
-            </Stack>
-          </SectionCard>
 
           {requestMetrics.articleCount > 0 && (
             <Grid container spacing={3}>
@@ -639,3 +558,4 @@ export default function ConfirmerDashboard() {
     </Box>
   );
 }
+

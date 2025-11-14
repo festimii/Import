@@ -26,7 +26,9 @@ import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { PickersDay } from "@mui/x-date-pickers/PickersDay";
 import { alpha } from "@mui/material/styles";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import DeleteRoundedIcon from "@mui/icons-material/DeleteRounded";
 import Diversity3Icon from "@mui/icons-material/Diversity3";
+import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import ViewInArIcon from "@mui/icons-material/ViewInAr";
 import { format } from "date-fns";
@@ -326,6 +328,10 @@ const CalendarOverview = ({
   allowRequesterReschedule = false,
   requesterUsername = null,
   onRequesterReschedule,
+  onRequesterEditBatch,
+  onRequesterDeleteBatch,
+  requesterEditBatchId,
+  requesterDeleteBatchId,
 }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [confirmedRequests, setConfirmedRequests] = useState([]);
@@ -1074,6 +1080,20 @@ const CalendarOverview = ({
                   Array.isArray(batch.RequesterList) &&
                   batch.RequesterList.includes(requesterUsername) &&
                   (requestIdTargets.length > 0 || Boolean(batch.ID));
+                const canRequesterManageBatch =
+                  allowRequesterReschedule &&
+                  requesterUsername &&
+                  Boolean(batch.BatchId) &&
+                  Array.isArray(batch.RequesterList) &&
+                  batch.RequesterList.includes(requesterUsername);
+                const requesterEditInFlight =
+                  requesterEditBatchId &&
+                  batch.BatchId &&
+                  requesterEditBatchId === batch.BatchId;
+                const requesterDeleteInFlight =
+                  requesterDeleteBatchId &&
+                  batch.BatchId &&
+                  requesterDeleteBatchId === batch.BatchId;
 
                 const chipItems = [
                   actualArrivalDateLabel
@@ -1262,28 +1282,75 @@ const CalendarOverview = ({
                           </Collapse>
                         </>
                       )}
-                      {canEditArrival && (
-                        <Button
-                          type="button"
-                          size="small"
-                          variant="outlined"
-                          color="secondary"
-                          onClick={() => handleOpenArrivalDialog(batch)}
-                          sx={{ alignSelf: "flex-start" }}
+                      {(canEditArrival ||
+                        canRequesterReschedule ||
+                        (canRequesterManageBatch &&
+                          (onRequesterEditBatch || onRequesterDeleteBatch))) && (
+                        <Stack
+                          direction={{ xs: "column", sm: "row" }}
+                          spacing={1}
+                          alignItems="flex-start"
+                          flexWrap="wrap"
+                          useFlexGap
                         >
-                          Actual arrival date
-                        </Button>
-                      )}
-                      {canRequesterReschedule && (
-                        <Button
-                          type="button"
-                          size="small"
-                          variant="outlined"
-                          onClick={() => handleOpenRequesterDialog(batch)}
-                          sx={{ alignSelf: "flex-start" }}
-                        >
-                          Reschedule arrival
-                        </Button>
+                          {canEditArrival && (
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="outlined"
+                              color="secondary"
+                              onClick={() => handleOpenArrivalDialog(batch)}
+                              sx={{ alignSelf: "flex-start" }}
+                            >
+                              Actual arrival date
+                            </Button>
+                          )}
+                          {canRequesterReschedule && (
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="outlined"
+                              onClick={() => handleOpenRequesterDialog(batch)}
+                              sx={{ alignSelf: "flex-start" }}
+                            >
+                              Reschedule arrival
+                            </Button>
+                          )}
+                          {canRequesterManageBatch &&
+                            onRequesterEditBatch &&
+                            batch.BatchId && (
+                              <Button
+                                type="button"
+                                size="small"
+                                variant="outlined"
+                                startIcon={<EditRoundedIcon />}
+                                onClick={() => onRequesterEditBatch(batch)}
+                                disabled={
+                                  requesterEditInFlight ||
+                                  requesterDeleteInFlight
+                                }
+                              >
+                                Edit order
+                              </Button>
+                            )}
+                          {canRequesterManageBatch &&
+                            onRequesterDeleteBatch &&
+                            batch.BatchId && (
+                              <Button
+                                type="button"
+                                size="small"
+                                color="error"
+                                variant="outlined"
+                                startIcon={<DeleteRoundedIcon />}
+                                onClick={() => onRequesterDeleteBatch(batch)}
+                                disabled={requesterDeleteInFlight}
+                              >
+                                {requesterDeleteInFlight
+                                  ? "Deleting..."
+                                  : "Delete"}
+                              </Button>
+                            )}
+                        </Stack>
                       )}
                     </Stack>
                   }

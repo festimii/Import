@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -34,9 +34,8 @@ import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
-import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
-import NotificationCenter from "../components/NotificationCenter";
 import SectionCard from "../components/SectionCard";
+import NotificationMenu from "../components/NotificationMenu";
 import { formatArticleLabel } from "../utils/formatArticle";
 
 export default function AdminDashboard() {
@@ -54,7 +53,6 @@ export default function AdminDashboard() {
   const [wmsOrders, setWmsOrders] = useState([]);
   const [wmsLoading, setWmsLoading] = useState(true);
   const [wmsFeedback, setWmsFeedback] = useState(null);
-  const notificationCenterRef = useRef(null);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [arrivalFilter, setArrivalFilter] = useState("");
@@ -734,20 +732,29 @@ export default function AdminDashboard() {
       <PageHero
         title="Admin workspace"
         subtitle="Track approved import requests, anticipate arrivals and curate role-based access for every collaborator."
-        actions={
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-            <Button
-              variant="outlined"
-              color="inherit"
-              onClick={handleOpenUserDialog}
-            >
-              Manage users
-            </Button>
-            <Button variant="contained" color="secondary" onClick={logout}>
-              Logout
-            </Button>
-          </Stack>
-        }
+        actions={[
+          <NotificationMenu
+            key="notifications"
+            onUnreadChange={setUnreadNotifications}
+            onLoadingChange={setNotificationsLoading}
+          />,
+          <Button
+            key="manage-users"
+            variant="outlined"
+            color="inherit"
+            onClick={handleOpenUserDialog}
+          >
+            Manage users
+          </Button>,
+          <Button
+            key="logout"
+            variant="contained"
+            color="secondary"
+            onClick={logout}
+          >
+            Logout
+          </Button>,
+        ]}
       >
         <Stack spacing={1.5} sx={{ color: "inherit" }}>
           <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
@@ -762,88 +769,6 @@ export default function AdminDashboard() {
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <SectionCard
-            title="Live notifications"
-            description="Receive instant alerts when approvers update requests or propose new arrival dates."
-            action={
-              <Button
-                type="button"
-                variant="contained"
-                color="secondary"
-                size="small"
-                startIcon={<AutorenewRoundedIcon />}
-                onClick={() => notificationCenterRef.current?.reload()}
-                disabled={notificationsLoading}
-              >
-                {notificationsLoading ? "Refreshing..." : "Refresh feed"}
-              </Button>
-            }
-            secondaryAction={
-              <Chip
-                label={
-                  notificationsLoading
-                    ? "Loading notifications"
-                    : unreadNotifications > 0
-                    ? `${unreadNotifications} unread`
-                    : "All caught up"
-                }
-                color={unreadNotifications > 0 ? "warning" : "success"}
-                variant="outlined"
-              />
-            }
-            sx={{
-              background: (theme) =>
-                `linear-gradient(135deg, ${alpha(
-                  theme.palette.secondary.light,
-                  0.08
-                )} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 100%)`,
-            }}
-          >
-            <Stack spacing={2.5}>
-              <Alert
-                icon={<NotificationsActiveRoundedIcon fontSize="inherit" />}
-                severity={unreadNotifications > 0 ? "info" : "success"}
-                variant="outlined"
-                sx={{
-                  borderRadius: 3,
-                  backgroundColor: (theme) =>
-                    alpha(
-                      unreadNotifications > 0
-                        ? theme.palette.info.light
-                        : theme.palette.success.light,
-                      0.08
-                    ),
-                }}
-              >
-                {unreadNotifications > 0
-                  ? `You have ${unreadNotifications} unread notification${
-                      unreadNotifications === 1 ? "" : "s"
-                    }.`
-                  : "You're up to date with the latest changes."}
-              </Alert>
-              <NotificationPermissionBanner
-                onEnabled={() => notificationCenterRef.current?.reload()}
-              />
-              <Paper
-                elevation={0}
-                variant="outlined"
-                sx={{
-                  borderRadius: 3,
-                  p: { xs: 2, md: 3 },
-                  backgroundColor: (theme) =>
-                    alpha(theme.palette.background.default, 0.75),
-                }}
-              >
-                <NotificationCenter
-                  ref={notificationCenterRef}
-                  onUnreadCountChange={setUnreadNotifications}
-                  onLoadingChange={setNotificationsLoading}
-                  description="Receive instant alerts when approvers update requests or propose new arrival dates."
-                  emptyMessage="No unread updates at the moment."
-                />
-              </Paper>
-            </Stack>
-          </SectionCard>
           <SectionCard
             title="Organization health"
             description="Monitor how many users can submit, confirm or administer requests."
@@ -1476,5 +1401,6 @@ export default function AdminDashboard() {
     </Box>
   );
 }
+
 
 

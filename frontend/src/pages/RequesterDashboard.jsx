@@ -26,19 +26,19 @@ import {
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import AddCircleRoundedIcon from "@mui/icons-material/AddCircleRounded";
-import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
 import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import EventRepeatRoundedIcon from "@mui/icons-material/EventRepeatRounded";
-import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
+import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
+import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import UndoRoundedIcon from "@mui/icons-material/UndoRounded";
 import API from "../api";
 import formatArticleCode, { formatArticleLabel } from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
 import PageHero from "../components/PageHero";
 import SectionCard from "../components/SectionCard";
-import NotificationPermissionBanner from "../components/NotificationPermissionBanner";
-import NotificationCenter from "../components/NotificationCenter";
+import NotificationMenu from "../components/NotificationMenu";
 
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -193,6 +193,22 @@ const STATUS_COLOR_MAP = {
   rejected: "error",
 };
 
+const NON_PENDING_STATUSES = new Set([
+  "approved",
+  "rejected",
+  "completed",
+  "cancelled",
+  "archived",
+]);
+
+const isPendingStatus = (status) => {
+  const normalized = String(status ?? "").toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  return !NON_PENDING_STATUSES.has(normalized);
+};
+
 const pickEarlierDateValue = (currentValue, candidate) => {
   if (!candidate) {
     return currentValue ?? null;
@@ -260,6 +276,161 @@ const getStatusChipColor = (status, isMixed) => {
   return STATUS_COLOR_MAP[status] ?? "default";
 };
 
+const formatBatchLabel = (value) => {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+  return value.slice(0, 8).toUpperCase();
+};
+
+const PendingRequestsDialog = ({
+  open,
+  onClose,
+  groups = [],
+  loading,
+  lastSyncedLabel,
+  onRefresh,
+}) => {
+  const totalArticles = useMemo(
+    () =>
+      groups.reduce(
+        (sum, group) => sum + (group?.items?.length ?? 0),
+        0
+      ),
+    [groups]
+  );
+
+  const dialogBody = (() => {
+    if (loading) {
+      return (
+        <Stack alignItems="center" spacing={1.5} sx={{ py: 6 }}>
+          <CircularProgress size={24} />
+          <Typography variant="body2" color="text.secondary">
+            Duke kontrolluar porositë në pritje...
+          </Typography>
+        </Stack>
+      );
+    }
+
+    if (groups.length === 0) {
+      return (
+        <Alert severity="success">
+          Nuk ka porosi në pritje për konfirmim.
+        </Alert>
+      );
+    }
+
+    return (
+      <Stack divider={<Divider flexItem />} spacing={2}>
+        {groups.map((group) => {
+          const plannedLabel = formatDateLabel(
+            group.plannedArrivalDate ??
+              group.requestDate ??
+              group.createdAt ??
+              null
+          );
+          const batchLabel = formatBatchLabel(group.batchId);
+          const articleCount = group.items?.length ?? 0;
+          const createdLabel = group.createdAt
+            ? formatDateLabel(group.createdAt)
+            : null;
+
+          return (
+            <Box key={group.key}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1}
+                justifyContent="space-between"
+                alignItems={{ xs: "flex-start", sm: "center" }}
+              >
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                    {group.importer}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Planifikuar: {plannedLabel}
+                  </Typography>
+                </Box>
+                <Chip
+                  label={group.statusLabel}
+                  color={group.statusColor || "default"}
+                  size="small"
+                  variant="outlined"
+                />
+              </Stack>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={2}
+                sx={{ mt: 1 }}
+                flexWrap="wrap"
+              >
+                <Typography variant="body2" color="text.secondary">
+                  Artikuj: {articleCount}
+                </Typography>
+                {group.varianceLabel && (
+                  <Typography variant="body2" color="text.secondary">
+                    Devijim: {group.varianceLabel}
+                  </Typography>
+                )}
+                {batchLabel && (
+                  <Typography variant="body2" color="text.secondary">
+                    Batch: {batchLabel}
+                  </Typography>
+                )}
+                {createdLabel && (
+                  <Typography variant="body2" color="text.secondary">
+                    Krijuar: {createdLabel}
+                  </Typography>
+                )}
+              </Stack>
+            </Box>
+          );
+        })}
+      </Stack>
+    );
+  })();
+
+  const groupLabel = groups.length === 1 ? "grup" : "grupe";
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>Porositë në pritje</DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={2}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", sm: "center" }}
+          >
+            <Stack spacing={0.5}>
+              <Typography variant="body2" color="text.secondary">
+                {lastSyncedLabel}
+              </Typography>
+              <Typography variant="body2" color="text.primary">
+                {groups.length} {groupLabel} • {totalArticles} artikuj
+              </Typography>
+            </Stack>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<RefreshRoundedIcon />}
+              onClick={onRefresh}
+              disabled={loading}
+            >
+              Rifresko
+            </Button>
+          </Stack>
+          {dialogBody}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Mbyll</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 export default function RequesterDashboard() {
   const currentDate = today();
   const requesterUsername = useMemo(() => decodeUsernameFromToken(), []);
@@ -269,11 +440,8 @@ export default function RequesterDashboard() {
   const [comment, setComment] = useState("");
   const [feedback, setFeedback] = useState(null);
   const [submissionDetails, setSubmissionDetails] = useState(null);
-  const notificationCenterRef = useRef(null);
   const excelInputRef = useRef(null);
   const [excelFiles, setExcelFiles] = useState([]);
-  const [notificationsLoading, setNotificationsLoading] = useState(true);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [showAdvancedTotals, setShowAdvancedTotals] = useState(false);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
   const [submittedRequests, setSubmittedRequests] = useState([]);
@@ -284,6 +452,10 @@ export default function RequesterDashboard() {
   const [editArrivalDate, setEditArrivalDate] = useState("");
   const [editFeedback, setEditFeedback] = useState(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [pendingDialogOpen, setPendingDialogOpen] = useState(false);
+  const [editingSubmission, setEditingSubmission] = useState(null);
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [deletingBatchId, setDeletingBatchId] = useState(null);
 
   const loadSubmittedRequests = useCallback(async () => {
     setSubmittedLoading(true);
@@ -338,6 +510,105 @@ export default function RequesterDashboard() {
     setExcelFiles([]);
     if (excelInputRef.current) {
       excelInputRef.current.value = "";
+    }
+  };
+
+  const resetFormState = () => {
+    setImporter("");
+    setArrivalDate("");
+    setComment("");
+    setItems([{ article: "", boxCount: "" }]);
+    setExcelFiles([]);
+    if (excelInputRef.current) {
+      excelInputRef.current.value = "";
+    }
+    setEditingSubmission(null);
+  };
+
+  const handleStartEditGroup = (group) => {
+    if (!group?.batchId) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message: "Kjo porosi nuk mbështet editimin.",
+      });
+      return;
+    }
+
+    const targetItems = Array.isArray(group.items) ? group.items : [];
+    setImporter(group.importer ?? "");
+    setArrivalDate(
+      toDateInputValue(
+        group.plannedArrivalDate ??
+          group.actualArrivalDate ??
+          group.requestDate ??
+          ""
+      )
+    );
+    setComment(targetItems[0]?.Comment ?? "");
+    setItems(
+      targetItems.map((item) => ({
+        article: item.Article ?? "",
+        boxCount:
+          typeof item.BoxCount === "number"
+            ? item.BoxCount
+            : item.BoxCount ?? "",
+      }))
+    );
+    setExcelFiles([]);
+    if (excelInputRef.current) {
+      excelInputRef.current.value = "";
+    }
+    setEditingSubmission({
+      batchId: group.batchId,
+      label: group.importer ?? formatBatchLabel(group.batchId) ?? "porosia",
+      requestDate:
+        toDateInputValue(group.requestDate) ??
+        toDateInputValue(targetItems[0]?.RequestDate) ??
+        currentDate,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleCancelEditSubmission = () => {
+    resetFormState();
+  };
+
+  const handleDeleteGroup = async (group) => {
+    if (!group?.batchId) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message: "Kjo porosi nuk mbështet fshirjen.",
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Dëshironi të fshini këtë porosi? Ky veprim nuk mund të zhbëhet."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingBatchId(group.batchId);
+    try {
+      await API.delete(`/imports/batch/${group.batchId}`);
+      setSubmittedFeedback({
+        severity: "success",
+        message: "Porosia u fshi me sukses.",
+      });
+      await loadSubmittedRequests();
+      if (editingSubmission?.batchId === group.batchId) {
+        resetFormState();
+      }
+    } catch (error) {
+      setSubmittedFeedback({
+        severity: "error",
+        message:
+          error?.response?.data?.message ??
+          "Nuk mundëm të fshijmë porosinë. Ju lutemi provoni përsëri.",
+      });
+    } finally {
+      setDeletingBatchId(null);
     }
   };
 
@@ -421,8 +692,17 @@ export default function RequesterDashboard() {
     event.preventDefault();
     setFeedback(null);
 
+    const isEditingSubmission = Boolean(editingSubmission);
     const hasExcelFiles = excelFiles.length > 0;
     const importerValue = importer.trim();
+
+    if (isEditingSubmission && hasExcelFiles) {
+      setFeedback({
+        severity: "error",
+        message: "Përditësimi i porosisë nuk mbështet ngarkimin e Excel.",
+      });
+      return;
+    }
 
     if (!arrivalDate && !hasExcelFiles) {
       setFeedback({
@@ -474,59 +754,79 @@ export default function RequesterDashboard() {
       }
     }
 
-    try {
-      let response;
+    setFormSubmitting(true);
 
-      if (hasExcelFiles) {
-        const formData = new FormData();
-        formData.append("requestDate", currentDate);
-        if (importerValue) {
-          formData.append("importer", importerValue);
-        }
-        if (arrivalDate) {
-          formData.append("arrivalDate", arrivalDate);
-        }
-        if (comment.trim()) {
-          formData.append("comment", comment);
-        }
-        excelFiles.forEach((file) => formData.append("files", file, file.name));
-        response = await API.post("/imports/upload", formData, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-      } else {
-        response = await API.post("/imports", {
-          requestDate: currentDate,
+    try {
+      if (isEditingSubmission) {
+        await API.put(`/imports/batch/${editingSubmission.batchId}`, {
+          requestDate: editingSubmission.requestDate ?? currentDate,
           arrivalDate,
           importer: importerValue,
           comment,
           items: preparedItems,
         });
-      }
 
-      const payload = response.data;
-      const normalizedPayload = extractSubmittedItems(payload);
-      setFeedback({
-        severity: "success",
-        message: hasExcelFiles
-          ? `Imported ${normalizedPayload.length} row${
-              normalizedPayload.length === 1 ? "" : "s"
-            } from Excel successfully.`
-          : "Import order submitted successfully.",
-      });
-      if (hasExcelFiles) {
-        setImporter(payload?.importer ?? "");
-        setArrivalDate(payload?.arrivalDate ?? "");
+        setFeedback({
+          severity: "success",
+          message: "Porosia u përditësua dhe u ridërgua për konfirmim.",
+        });
+        resetFormState();
       } else {
-        setImporter("");
-        setArrivalDate("");
-      }
-      setItems([{ article: "", boxCount: "" }]);
-      setComment("");
-      setSubmissionDetails(
-        normalizedPayload.length > 0 ? { items: normalizedPayload } : null
-      );
-      if (hasExcelFiles) {
-        handleExcelClear();
+        let response;
+
+        if (hasExcelFiles) {
+          const formData = new FormData();
+          formData.append("requestDate", currentDate);
+          if (importerValue) {
+            formData.append("importer", importerValue);
+          }
+          if (arrivalDate) {
+            formData.append("arrivalDate", arrivalDate);
+          }
+          if (comment.trim()) {
+            formData.append("comment", comment);
+          }
+          excelFiles.forEach((file) =>
+            formData.append("files", file, file.name)
+          );
+          response = await API.post("/imports/upload", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+        } else {
+          response = await API.post("/imports", {
+            requestDate: currentDate,
+            arrivalDate,
+            importer: importerValue,
+            comment,
+            items: preparedItems,
+          });
+        }
+
+        const payload = response.data;
+        const normalizedPayload = extractSubmittedItems(payload);
+        setFeedback({
+          severity: "success",
+          message: hasExcelFiles
+            ? `Imported ${normalizedPayload.length} row${
+                normalizedPayload.length === 1 ? "" : "s"
+              } from Excel successfully.`
+            : "Import order submitted successfully.",
+        });
+        if (hasExcelFiles) {
+          setImporter(payload?.importer ?? "");
+          setArrivalDate(payload?.arrivalDate ?? "");
+        } else {
+          setImporter("");
+          setArrivalDate("");
+        }
+        setItems([{ article: "", boxCount: "" }]);
+        setComment("");
+        setSubmissionDetails(
+          normalizedPayload.length > 0 ? { items: normalizedPayload } : null
+        );
+        if (hasExcelFiles) {
+          handleExcelClear();
+        }
       }
 
       await loadSubmittedRequests();
@@ -537,6 +837,8 @@ export default function RequesterDashboard() {
           error.response?.data?.message ||
           "Something went wrong while creating the order.",
       });
+    } finally {
+      setFormSubmitting(false);
     }
   };
 
@@ -725,8 +1027,10 @@ export default function RequesterDashboard() {
         const statuses = Array.from(group.statuses);
         const isMixed = statuses.length > 1;
         const primaryStatus = isMixed ? null : statuses[0];
+        const pending = statuses.some(isPendingStatus);
         return {
           ...group,
+          statuses,
           statusLabel: isMixed
             ? "Multiple statuses"
             : formatStatusLabel(primaryStatus),
@@ -736,6 +1040,7 @@ export default function RequesterDashboard() {
             group.actualArrivalDate
           ),
           canEditArrival: !group.hasActualArrival,
+          isPending: pending,
         };
       })
       .sort((a, b) => {
@@ -756,6 +1061,61 @@ export default function RequesterDashboard() {
         return bTime - aTime;
       });
   }, [submittedRequests]);
+
+  const findGroupByBatchId = (batchId) => {
+    if (!batchId) return null;
+    return groupedSubmissions.find(
+      (group) => group.batchId && group.batchId === batchId
+    );
+  };
+
+  const handleCalendarEditBatch = (batch) => {
+    const match = findGroupByBatchId(batch?.BatchId);
+    if (!match) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message:
+          "Nuk mundëm të gjenim artikujt për këtë porosi. Rifreskoni dhe provoni përsëri.",
+      });
+      return;
+    }
+    handleStartEditGroup(match);
+  };
+
+  const handleCalendarDeleteBatch = (batch) => {
+    const match = findGroupByBatchId(batch?.BatchId);
+    if (!match) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message:
+          "Nuk mundëm të gjenim artikujt për këtë porosi. Rifreskoni dhe provoni përsëri.",
+      });
+      return;
+    }
+    handleDeleteGroup(match);
+  };
+
+  const pendingGroups = useMemo(
+    () => groupedSubmissions.filter((group) => group.isPending),
+    [groupedSubmissions]
+  );
+
+  const pendingSummary = useMemo(
+    () => ({
+      totalGroups: pendingGroups.length,
+      totalArticles: pendingGroups.reduce(
+        (sum, group) => sum + (group.items?.length ?? 0),
+        0
+      ),
+    }),
+    [pendingGroups]
+  );
+
+  const pendingButtonLabel =
+    pendingSummary.totalGroups > 0
+      ? `${pendingSummary.totalGroups} në pritje`
+      : "Pa porosi në pritje";
+  const isEditingSubmission = Boolean(editingSubmission);
 
   const requestsLastSyncedLabel = useMemo(() => {
     if (!requestsLastLoadedAt) {
@@ -810,98 +1170,35 @@ export default function RequesterDashboard() {
       <PageHero
         title="Stock Menagment"
         subtitle=""
-        actions={
-          <Button variant="contained" color="secondary" onClick={logout}>
+        actions={[
+          <Button
+            key="pending"
+            variant="outlined"
+            color={pendingSummary.totalGroups > 0 ? "warning" : "inherit"}
+            startIcon={<PendingActionsRoundedIcon />}
+            onClick={() => setPendingDialogOpen(true)}
+          >
+            {pendingButtonLabel}
+          </Button>,
+          <NotificationMenu key="notifications" />,
+          <Button
+            key="logout"
+            variant="contained"
+            color="secondary"
+            onClick={logout}
+          >
             Logout
-          </Button>
-        }
+          </Button>,
+        ]}
       ></PageHero>
 
       <Container sx={{ flexGrow: 1, py: { xs: 4, md: 6 } }} maxWidth="lg">
         <Stack spacing={4}>
-          <SectionCard
-            title="Notifications"
-            description="Stay in sync with confirmations, comments and changes from the warehouse team."
-            action={
-              <Button
-                type="button"
-                variant="contained"
-                color="secondary"
-                size="small"
-                startIcon={<AutorenewRoundedIcon />}
-                onClick={() => notificationCenterRef.current?.reload()}
-                disabled={notificationsLoading}
-              >
-                {notificationsLoading ? "Refreshing..." : "Refresh feed"}
-              </Button>
-            }
-            secondaryAction={
-              <Chip
-                label={
-                  notificationsLoading
-                    ? "Loading notifications"
-                    : unreadNotifications > 0
-                    ? `${unreadNotifications} unread`
-                    : "All caught up"
-                }
-                color={unreadNotifications > 0 ? "warning" : "success"}
-                variant="outlined"
-              />
-            }
-            sx={{
-              background: (theme) =>
-                `linear-gradient(135deg, ${alpha(
-                  theme.palette.success.light,
-                  0.1
-                )} 0%, ${alpha(theme.palette.success.main, 0.05)} 100%)`,
-            }}
-          >
-            <Stack spacing={2.5}>
-              <Alert
-                icon={<NotificationsActiveRoundedIcon fontSize="inherit" />}
-                severity={unreadNotifications > 0 ? "info" : "success"}
-                variant="outlined"
-                sx={{
-                  borderRadius: 3,
-                  backgroundColor: (theme) =>
-                    alpha(
-                      unreadNotifications > 0
-                        ? theme.palette.info.light
-                        : theme.palette.success.light,
-                      0.08
-                    ),
-                }}
-              >
-                {unreadNotifications > 0
-                  ? `You have ${unreadNotifications} unread notification${
-                      unreadNotifications === 1 ? "" : "s"
-                    }.`
-                  : "You're up to date with the latest changes."}
-              </Alert>
-              <NotificationPermissionBanner
-                onEnabled={() => notificationCenterRef.current?.reload()}
-              />
-              <Paper
-                elevation={0}
-                variant="outlined"
-                sx={{
-                  borderRadius: 3,
-                  p: { xs: 2, md: 3 },
-                  backgroundColor: (theme) =>
-                    alpha(theme.palette.background.default, 0.75),
-                }}
-              >
-                <NotificationCenter
-                  ref={notificationCenterRef}
-                  onUnreadCountChange={setUnreadNotifications}
-                  onLoadingChange={setNotificationsLoading}
-                  description=""
-                  emptyMessage="You're up to date with the latest changes."
-                />
-              </Paper>
-            </Stack>
-          </SectionCard>
-
+          {submittedFeedback && (
+            <Alert severity={submittedFeedback.severity}>
+              {submittedFeedback.message}
+            </Alert>
+          )}
           <SectionCard
             title="Krijo porosi te re"
             description="Vendos detajet e porosise se importit per te filluar procesin e palletizimit dhe planifikimit te ardhjes."
@@ -909,6 +1206,27 @@ export default function RequesterDashboard() {
             <Stack spacing={4}>
               {feedback && (
                 <Alert severity={feedback.severity}>{feedback.message}</Alert>
+              )}
+              {isEditingSubmission && (
+                <Alert
+                  severity="info"
+                  action={
+                    <Button
+                      color="inherit"
+                      size="small"
+                      startIcon={<UndoRoundedIcon />}
+                      onClick={handleCancelEditSubmission}
+                    >
+                      Dil nga editimi
+                    </Button>
+                  }
+                >
+                  Duke përditësuar{" "}
+                  <Typography component="span" fontWeight={600}>
+                    {editingSubmission.label}
+                  </Typography>
+                  . Ndryshimet do të ridërgohen për konfirmim.
+                </Alert>
               )}
 
               <Box component="form" onSubmit={handleSubmit} noValidate>
@@ -1064,6 +1382,7 @@ export default function RequesterDashboard() {
                           component="label"
                           variant="outlined"
                           startIcon={<CloudUploadRoundedIcon />}
+                          disabled={isEditingSubmission}
                         >
                           Zgjidh Excel
                           <input
@@ -1073,6 +1392,7 @@ export default function RequesterDashboard() {
                             accept=".xlsx,.xls"
                             ref={excelInputRef}
                             onChange={handleExcelChange}
+                            disabled={isEditingSubmission}
                           />
                         </Button>
                         {excelFiles.length > 0 && (
@@ -1081,11 +1401,18 @@ export default function RequesterDashboard() {
                             color="secondary"
                             startIcon={<DeleteOutlineRoundedIcon />}
                             onClick={handleExcelClear}
+                            disabled={isEditingSubmission}
                           >
                             Hiq skedaret
                           </Button>
                         )}
                       </Stack>
+                      {isEditingSubmission && (
+                        <Typography variant="caption" color="text.secondary">
+                          Ngarkimi i Excel është i çaktivizuar gjatë
+                          përditësimit të një porosie ekzistuese.
+                        </Typography>
+                      )}
                       {excelFiles.length > 0 && (
                         <>
                           <Stack
@@ -1137,8 +1464,15 @@ export default function RequesterDashboard() {
                       variant="contained"
                       size="large"
                       endIcon={<SendRoundedIcon />}
+                      disabled={formSubmitting}
                     >
-                      Submit order
+                      {isEditingSubmission
+                        ? formSubmitting
+                          ? "Duke ruajtur..."
+                          : "Ruaj ndryshimet"
+                        : formSubmitting
+                        ? "Duke dërguar..."
+                        : "Submit order"}
                     </Button>
                   </Box>
                 </Stack>
@@ -1152,6 +1486,10 @@ export default function RequesterDashboard() {
             allowRequesterReschedule
             requesterUsername={requesterUsername}
             onRequesterReschedule={loadSubmittedRequests}
+            onRequesterEditBatch={handleCalendarEditBatch}
+            onRequesterDeleteBatch={handleCalendarDeleteBatch}
+            requesterEditBatchId={editingSubmission?.batchId ?? null}
+            requesterDeleteBatchId={deletingBatchId}
           />
 
           {latestItems.length > 0 && (
@@ -1322,6 +1660,14 @@ export default function RequesterDashboard() {
           )}
         </Stack>
       </Container>
+      <PendingRequestsDialog
+        open={pendingDialogOpen}
+        onClose={() => setPendingDialogOpen(false)}
+        groups={pendingGroups}
+        loading={submittedLoading}
+        lastSyncedLabel={requestsLastSyncedLabel}
+        onRefresh={loadSubmittedRequests}
+      />
       <Dialog
         open={Boolean(editingGroup)}
         onClose={handleCloseArrivalRevision}
@@ -1382,3 +1728,4 @@ export default function RequesterDashboard() {
     </Box>
   );
 }
+

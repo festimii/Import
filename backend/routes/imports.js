@@ -143,6 +143,185 @@ const formatNotificationDate = (value) => {
   return "TBD";
 };
 
+const formatBatchCode = (batchId) => {
+  if (!batchId) {
+    return null;
+  }
+  return String(batchId).split("-")[0].toUpperCase();
+};
+
+const formatBillName = (record = {}) => {
+  const commentLabel = trimString(record.Comment);
+  if (commentLabel) {
+    return commentLabel;
+  }
+
+  const importerLabel = trimString(record.Importer);
+  if (importerLabel) {
+    return importerLabel;
+  }
+
+  const batchCode = formatBatchCode(record.BatchId);
+  if (batchCode) {
+    return `Batch ${batchCode}`;
+  }
+
+  if (record.ID) {
+    return `Kërkesa #${record.ID}`;
+  }
+
+  return "Porosi importi";
+};
+
+const describeStatusInAlbanian = (status) => {
+  const normalized = trimString(status)?.toLowerCase();
+
+  switch (normalized) {
+    case "approved":
+      return "U miratua";
+    case "rejected":
+      return "U refuzua";
+    case "pending":
+    case "awaiting_confirmation":
+      return "Në pritje të konfirmimit";
+    case "confirmed":
+      return "U konfirmua";
+    case "needs_confirmation":
+      return "Kërkon konfirmim";
+    default:
+      if (!normalized) {
+        return null;
+      }
+      return `Statusi i ri: ${normalized}`;
+  }
+};
+
+const isValidGuid = (value) =>
+  typeof value === "string" &&
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(
+    value.trim()
+  );
+
+const describeActionDetails = (action, metadata = {}) => {
+  switch (action) {
+    case "created":
+      return "Kërkesë e re - në pritje të konfirmimit";
+    case "arrival_change": {
+      const previous = metadata.previousDate
+        ? formatNotificationDate(metadata.previousDate)
+        : null;
+      const next = metadata.nextDate
+        ? formatNotificationDate(metadata.nextDate)
+        : null;
+
+      if (previous && next && previous !== next) {
+        return `Data e planifikuar: ${previous} -> ${next}`;
+      }
+      if (next) {
+        return `Data e planifikuar: ${next}`;
+      }
+      if (previous) {
+        return `Data e planifikuar: ${previous}`;
+      }
+      return "Data e planifikuar u përditësua";
+    }
+    case "actual_arrival": {
+      const previous = metadata.previousDate
+        ? formatNotificationDate(metadata.previousDate)
+        : null;
+      const next = metadata.nextDate
+        ? formatNotificationDate(metadata.nextDate)
+        : null;
+
+      if (previous && next && previous !== next) {
+        return `Mbërritja reale: ${previous} -> ${next}`;
+      }
+      if (next) {
+        return `Mbërritja reale: ${next}`;
+      }
+      if (previous) {
+        return `Mbërritja reale: ${previous}`;
+      }
+      return "Mbërritja reale u përditësua";
+    }
+    case "status":
+      return describeStatusInAlbanian(metadata.status);
+    case "edited":
+      return "Detajet u përditësuan dhe kërkohet konfirmim i ri";
+    case "deleted":
+      return "Kërkesa u anulua nga kërkuesi";
+    default:
+      return null;
+  }
+};
+
+const buildNotificationCopy = ({
+  action,
+  record,
+  actor,
+  metadata = {},
+}) => {
+  const billName = formatBillName(record);
+  const arrivalReference =
+    metadata.arrivalDate ||
+    metadata.nextDate ||
+    record.ArrivalDate ||
+    record.PlannedArrivalDate ||
+    record.RequestDate;
+  const arrivalLabel = formatNotificationDate(arrivalReference);
+  const userLabel =
+    trimString(actor) || trimString(record.Requester) || "përdoruesi";
+  const actionDetails = describeActionDetails(action, metadata);
+  const summary = `${billName} | ${arrivalLabel} | ${userLabel}`;
+  const message = actionDetails ? `${summary} - ${actionDetails}.` : summary;
+  const pushBody = actionDetails
+    ? `${arrivalLabel} | ${userLabel} - ${actionDetails}.`
+    : `${arrivalLabel} | ${userLabel}`;
+
+  return {
+    message,
+    pushTitle: billName,
+    pushBody,
+  };
+};
+
+const recordRequestLog = async ({
+  pool,
+  transaction,
+  requestId,
+  batchId,
+  username,
+  action,
+  details,
+  snapshot,
+}) => {
+  try {
+    const targetPool = pool ?? (await poolPromise);
+    const executor = transaction
+      ? new sql.Request(transaction)
+      : targetPool.request();
+
+    executor.input("Action", sql.NVarChar(64), action || "unknown");
+    executor.input("RequestID", sql.Int, requestId ?? null);
+    executor.input("Username", sql.NVarChar(128), username ?? null);
+    executor.input("Details", sql.NVarChar(1000), details ?? null);
+    executor.input("Snapshot", sql.NVarChar(sql.MAX), snapshot ?? null);
+
+    if (batchId) {
+      executor.input("BatchId", sql.UniqueIdentifier, batchId);
+    } else {
+      executor.input("BatchId", sql.UniqueIdentifier, null);
+    }
+
+    await executor.query(`
+      INSERT INTO dbo.ImportRequestLogs (RequestID, BatchId, Username, Action, Details, Snapshot)
+      VALUES (@RequestID, @BatchId, @Username, @Action, @Details, @Snapshot);
+    `);
+  } catch (logError) {
+    console.error("Request log error:", logError?.message || logError);
+  }
+};
+
 const normalizePalletCalculation = (row = {}) => {
   const fullPalletsRaw = numberOrNull(row.Full_Pallets) ?? 0;
   const boxesPerPallet = numberOrNull(row.Boxes_per_Pallet);
@@ -910,10 +1089,32 @@ const ensureImportRequestEnhancements = () => {
         }
       };
 
+      const ensureRequestLogTable = async () => {
+        await pool.request().query(`
+          IF OBJECT_ID('dbo.ImportRequestLogs', 'U') IS NULL
+          BEGIN
+            CREATE TABLE dbo.ImportRequestLogs (
+              ID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+              RequestID INT NULL,
+              BatchId UNIQUEIDENTIFIER NULL,
+              Username NVARCHAR(128) NULL,
+              Action NVARCHAR(64) NOT NULL,
+              Details NVARCHAR(1000) NULL,
+              Snapshot NVARCHAR(MAX) NULL,
+              CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_ImportRequestLogs_CreatedAt DEFAULT (SYSUTCDATETIME())
+            );
+
+            CREATE INDEX IX_ImportRequestLogs_BatchId ON dbo.ImportRequestLogs (BatchId);
+            CREATE INDEX IX_ImportRequestLogs_RequestID ON dbo.ImportRequestLogs (RequestID);
+          END;
+        `);
+      };
+
       await ensureBatchColumn();
       await ensureArticleNameColumn();
       await ensureActualArrivalColumn();
       await ensureDetailsTable();
+      await ensureRequestLogTable();
     })();
 
     ensureEnhancementsPromise = runner
@@ -1084,6 +1285,7 @@ const insertImportRequestItems = async ({
   requesterUsername,
   batchId,
   defaultComment,
+  transactionOverride,
 }) => {
   if (!Array.isArray(normalizedItems) || normalizedItems.length === 0) {
     throw new Error("At least one article is required for the import order.");
@@ -1097,14 +1299,18 @@ const insertImportRequestItems = async ({
 
   const pool = await poolPromise;
   const secondaryPool = await secondaryPoolPromise;
-  const transaction = new sql.Transaction(pool);
+  const transaction =
+    transactionOverride ?? new sql.Transaction(pool);
+  const ownsTransaction = !transactionOverride;
   const insertedRecords = [];
   const articleNameLookup = await fetchArticleNames(
     secondaryPool,
     normalizedItems.map((item) => item.article)
   );
 
-  await transaction.begin();
+  if (ownsTransaction) {
+    await transaction.begin();
+  }
 
   try {
     for (let index = 0; index < normalizedItems.length; index += 1) {
@@ -1351,13 +1557,17 @@ const insertImportRequestItems = async ({
       }
     }
 
-    await transaction.commit();
+    if (ownsTransaction) {
+      await transaction.commit();
+    }
     return insertedRecords;
   } catch (transactionError) {
-    try {
-      await transaction.rollback();
-    } catch (rollbackError) {
-      console.error("Rollback error:", rollbackError.message);
+    if (ownsTransaction) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error("Rollback error:", rollbackError.message);
+      }
     }
 
     throw transactionError;
@@ -1372,21 +1582,26 @@ const notifyRequestCreation = async ({ pool, records, initiatorUsername }) => {
   const newRequestRoles = ["admin", "confirmer"];
 
   for (const record of records) {
-    const arrivalLabel = formatNotificationDate(record.ArrivalDate);
-    const importerLabel = record.Importer || "Unknown importer";
-    const articleLabel = record.ArticleName || record.Article || "N/A";
-    const message = `${initiatorUsername} submitted request #${record.ID} (${articleLabel}) for ${importerLabel} with arrival ${arrivalLabel}.`;
+    const copy = buildNotificationCopy({
+      action: "created",
+      record,
+      actor: initiatorUsername,
+      metadata: {
+        arrivalDate:
+          record.ArrivalDate || record.PlannedArrivalDate || record.RequestDate,
+      },
+    });
 
     try {
       await dispatchNotificationEvent(pool, {
         requestId: record.ID,
-        message,
+        message: copy.message,
         type: "request_created",
         roles: newRequestRoles,
         excludeUsername: initiatorUsername,
         push: {
-          title: "New import request",
-          body: message,
+          title: copy.pushTitle,
+          body: copy.pushBody,
           data: { intent: "request_created" },
           tag: "request-" + record.ID + "-created",
         },
@@ -1560,6 +1775,64 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+const parseSqlDateOrFallback = (value, label, fallback) => {
+  const parseDate = (raw) => {
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed.toISOString().split("T")[0];
+  };
+
+  const direct = parseDate(value);
+  if (direct) {
+    return direct;
+  }
+
+  const fallbackDate = parseDate(fallback);
+  if (fallbackDate) {
+    return fallbackDate;
+  }
+
+  throw new Error(
+    label || "Invalid date provided."
+  );
+};
+
+const normalizeRequesterItemsPayload = (items, defaultComment) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("At least one article is required for the import order.");
+  }
+
+  const normalized = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const current = items[index] || {};
+    const trimmedArticle = normalizeArticleCode(
+      current.article ?? current.Artikulli ?? current.Article
+    );
+    if (!trimmedArticle) {
+      throw new Error(`Article code for item ${index + 1} is required.`);
+    }
+
+    const parsedBoxCount = Number(current.boxCount ?? current.NumriPakove);
+    if (!Number.isFinite(parsedBoxCount) || parsedBoxCount <= 0) {
+      throw new Error(
+        `Box count for item ${index + 1} must be a positive number.`
+      );
+    }
+
+    normalized.push({
+      article: trimmedArticle,
+      boxCount: parsedBoxCount,
+      palletCountOverride: Number(current.palletCount) || null,
+      comment: sanitizeComment(current.comment) ?? defaultComment,
+    });
+  }
+
+  return normalized;
+};
 
 router.post(
   "/upload",
@@ -2625,18 +2898,23 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       })();
 
       if (!previousDate || previousDate !== arrivalDateSqlValue) {
-        const requesterContext = requesterUsername
-          ? ` (requested by ${requesterUsername})`
-          : "";
-        const message = previousDate
-          ? `Arrival date${requesterContext} changed from ${previousDate} to ${arrivalDateSqlValue} by ${req.user.username}.`
-          : `Arrival date${requesterContext} set to ${arrivalDateSqlValue} by ${req.user.username}.`;
+        const copy = buildNotificationCopy({
+          action: "arrival_change",
+          record,
+          actor: req.user.username,
+          metadata: {
+            previousDate,
+            nextDate: arrivalDateSqlValue,
+          },
+        });
 
         notificationsToDispatch.push({
-          message,
+          message: copy.message,
           type: "arrival_date_change",
           roles: defaultNotificationRoles,
           usernames: requesterAudience,
+          pushTitle: copy.pushTitle,
+          pushBody: copy.pushBody,
         });
       }
     }
@@ -2648,19 +2926,27 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         return parsed.toISOString().split("T")[0];
       })();
 
-      if (!previousActualDate || previousActualDate !== actualArrivalDateSqlValue) {
-        const requesterContext = requesterUsername
-          ? ` (requested by ${requesterUsername})`
-          : "";
-        const message = previousActualDate
-          ? `Actual arrival date${requesterContext} updated from ${previousActualDate} to ${actualArrivalDateSqlValue} by ${req.user.username}.`
-          : `Actual arrival date${requesterContext} recorded as ${actualArrivalDateSqlValue} by ${req.user.username}.`;
+      if (
+        !previousActualDate ||
+        previousActualDate !== actualArrivalDateSqlValue
+      ) {
+        const copy = buildNotificationCopy({
+          action: "actual_arrival",
+          record,
+          actor: req.user.username,
+          metadata: {
+            previousDate: previousActualDate,
+            nextDate: actualArrivalDateSqlValue,
+          },
+        });
 
         notificationsToDispatch.push({
-          message,
+          message: copy.message,
           type: "actual_arrival_date_change",
           roles: defaultNotificationRoles,
           usernames: requesterAudience,
+          pushTitle: copy.pushTitle,
+          pushBody: copy.pushBody,
         });
       }
     }
@@ -2670,23 +2956,20 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       const previousStatus = (CurrentStatus || "").toLowerCase();
 
       if (normalizedStatus !== previousStatus) {
-        const statusMessage = (() => {
-          if (normalizedStatus === "approved") {
-            return `Request ${record.ID} was approved by ${req.user.username}.`;
-          }
-
-          if (normalizedStatus === "rejected") {
-            return `Request ${record.ID} was rejected by ${req.user.username}.`;
-          }
-
-          return `Request ${record.ID} status updated to ${status} by ${req.user.username}.`;
-        })();
+        const copy = buildNotificationCopy({
+          action: "status",
+          record,
+          actor: req.user.username,
+          metadata: { status: normalizedStatus },
+        });
 
         notificationsToDispatch.push({
-          message: statusMessage,
+          message: copy.message,
           type: `status_${normalizedStatus || "update"}`,
           roles: defaultNotificationRoles,
           usernames: requesterAudience,
+          pushTitle: copy.pushTitle,
+          pushBody: copy.pushBody,
         });
       }
     }
@@ -2694,6 +2977,9 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     for (const notification of notificationsToDispatch) {
       try {
         const intent = notification.intent || notification.type;
+        const pushTitle =
+          notification.pushTitle || formatBillName(record);
+        const pushBody = notification.pushBody || notification.message;
 
         await dispatchNotificationEvent(pool, {
           requestId: record.ID,
@@ -2703,8 +2989,8 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
           roles: notification.roles || defaultNotificationRoles,
           excludeUsername: req.user.username,
           push: {
-            title: "Import Tracker Update",
-            body: notification.message,
+            title: pushTitle,
+            body: pushBody,
             data: {
               intent,
             },
@@ -2726,3 +3012,235 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
 });
 
 export default router;
+router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
+  const { batchId } = req.params;
+  if (!isValidGuid(batchId)) {
+    return res.status(400).json({ message: "Batch ID i pavlefshëm." });
+  }
+
+  const { importer, arrivalDate, requestDate, comment, items } = req.body || {};
+  const importerValue = trimString(importer);
+  if (!importerValue) {
+    return res
+      .status(400)
+      .json({ message: "Duhet të jepni emrin e importuesit." });
+  }
+  if (!arrivalDate) {
+    return res
+      .status(400)
+      .json({ message: "Data e arritjes është e detyrueshme." });
+  }
+
+  let normalizedItems;
+  const sanitizedDefaultComment = sanitizeComment(comment);
+  try {
+    normalizedItems = normalizeRequesterItemsPayload(
+      items,
+      sanitizedDefaultComment
+    );
+  } catch (payloadError) {
+    return res.status(400).json({ message: payloadError.message });
+  }
+
+  const pool = await poolPromise;
+  const existingResult = await pool
+    .request()
+    .input("BatchId", sql.UniqueIdentifier, batchId)
+    .query(`SELECT TOP 1 Requester, RequestDate, PlannedArrivalDate
+            FROM dbo.ImportRequests
+            WHERE BatchId = @BatchId`);
+
+  if (existingResult.recordset.length === 0) {
+    return res.status(404).json({ message: "Porosia nuk u gjet." });
+  }
+
+  const owner = trimString(existingResult.recordset[0].Requester)?.toLowerCase();
+  if (owner !== trimString(req.user.username)?.toLowerCase()) {
+    return res.status(403).json({
+      message: "Mund të modifikoni vetëm porositë që keni krijuar vetë.",
+    });
+  }
+
+  let requestDateSqlValue;
+  let arrivalDateSqlValue;
+  try {
+    requestDateSqlValue = parseSqlDateOrFallback(
+      requestDate,
+      "Data e kërkesës nuk është e vlefshme.",
+      existingResult.recordset[0].RequestDate
+    );
+    arrivalDateSqlValue = parseSqlDateOrFallback(
+      arrivalDate,
+      "Data e arritjes nuk është e vlefshme.",
+      existingResult.recordset[0].PlannedArrivalDate
+    );
+  } catch (dateError) {
+    return res.status(400).json({ message: dateError.message });
+  }
+
+  const transaction = new sql.Transaction(pool);
+  let insertedRecords = [];
+
+  try {
+    await transaction.begin();
+
+    await new sql.Request(transaction)
+      .input("BatchId", sql.UniqueIdentifier, batchId)
+      .query(`DELETE FROM dbo.ImportRequests WHERE BatchId = @BatchId;`);
+
+    insertedRecords = await insertImportRequestItems({
+      importer: importerValue,
+      requestDateSqlValue,
+      arrivalDateSqlValue,
+      normalizedItems,
+      requesterUsername: req.user.username,
+      batchId,
+      defaultComment: sanitizedDefaultComment,
+      transactionOverride: transaction,
+    });
+
+    await recordRequestLog({
+      transaction,
+      batchId,
+      username: req.user.username,
+      action: "updated",
+      details: `Përditësim i ${insertedRecords.length} artikujve nga kërkuesi.`,
+      snapshot: JSON.stringify({
+        importer: importerValue,
+        requestDate: requestDateSqlValue,
+        arrivalDate: arrivalDateSqlValue,
+        items: normalizedItems,
+      }),
+    });
+
+    await transaction.commit();
+  } catch (error) {
+    try {
+      await transaction.rollback();
+    } catch (rollbackError) {
+      console.error("Rollback error:", rollbackError.message);
+    }
+    console.error("Requester update error:", error);
+    return res.status(500).json({
+      message:
+        "Nuk mund të përditësonim porosinë në këtë moment. Ju lutemi provoni përsëri.",
+    });
+  }
+
+  if (insertedRecords.length > 0) {
+    const primaryRecord = insertedRecords[0];
+    const copy = buildNotificationCopy({
+      action: "edited",
+      record: primaryRecord,
+      actor: req.user.username,
+      metadata: {
+        previousDate: existingResult.recordset[0].PlannedArrivalDate,
+        nextDate: arrivalDateSqlValue,
+      },
+    });
+
+    await dispatchNotificationEvent(pool, {
+      requestId: primaryRecord.ID,
+      message: copy.message,
+      type: "request_updated",
+      roles: ["admin", "confirmer"],
+      excludeUsername: req.user.username,
+      push: {
+        title: copy.pushTitle,
+        body: copy.pushBody,
+        data: { intent: "request_updated" },
+        tag: `request-${primaryRecord.ID}-updated`,
+      },
+    });
+  }
+
+  res.json({ items: insertedRecords });
+});
+
+router.delete(
+  "/batch/:batchId",
+  verifyRole(["requester"]),
+  async (req, res) => {
+    const { batchId } = req.params;
+    if (!isValidGuid(batchId)) {
+      return res.status(400).json({ message: "Batch ID i pavlefshëm." });
+    }
+
+    const pool = await poolPromise;
+    const existingRecordsResult = await pool
+      .request()
+      .input("BatchId", sql.UniqueIdentifier, batchId)
+      .query(
+        `SELECT ID, Requester, Status, Importer, Comment, RequestDate, PlannedArrivalDate
+         FROM dbo.ImportRequests
+         WHERE BatchId = @BatchId`
+      );
+
+    if (existingRecordsResult.recordset.length === 0) {
+      return res.status(404).json({ message: "Porosia nuk u gjet." });
+    }
+
+    const owner = trimString(
+      existingRecordsResult.recordset[0].Requester
+    )?.toLowerCase();
+    if (owner !== trimString(req.user.username)?.toLowerCase()) {
+      return res.status(403).json({
+        message: "Mund të fshini vetëm porositë që keni krijuar vetë.",
+      });
+    }
+
+    const transaction = new sql.Transaction(pool);
+    try {
+      await transaction.begin();
+
+      await new sql.Request(transaction)
+        .input("BatchId", sql.UniqueIdentifier, batchId)
+        .query(`DELETE FROM dbo.ImportRequests WHERE BatchId = @BatchId;`);
+
+      await recordRequestLog({
+        transaction,
+        batchId,
+        username: req.user.username,
+        action: "deleted",
+        details: `Fshirje e ${existingRecordsResult.recordset.length} artikujve para konfirmimit.`,
+        snapshot: JSON.stringify(existingRecordsResult.recordset),
+      });
+
+      await transaction.commit();
+    } catch (error) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error("Rollback error:", rollbackError.message);
+      }
+      console.error("Requester delete error:", error);
+      return res.status(500).json({
+        message:
+          "Nuk mund të fshinim këtë porosi në këtë moment. Ju lutemi provoni përsëri.",
+      });
+    }
+
+    const referenceRecord = existingRecordsResult.recordset[0];
+    const copy = buildNotificationCopy({
+      action: "deleted",
+      record: referenceRecord,
+      actor: req.user.username,
+    });
+
+    await dispatchNotificationEvent(pool, {
+      requestId: referenceRecord.ID,
+      message: copy.message,
+      type: "request_deleted",
+      roles: ["admin", "confirmer"],
+      excludeUsername: req.user.username,
+      push: {
+        title: copy.pushTitle,
+        body: copy.pushBody,
+        data: { intent: "request_deleted" },
+        tag: `request-${referenceRecord.ID}-deleted`,
+      },
+    });
+
+    res.json({ deleted: existingRecordsResult.recordset.length });
+  }
+);
