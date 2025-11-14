@@ -332,6 +332,7 @@ const CalendarOverview = ({
   onRequesterDeleteBatch,
   requesterEditBatchId,
   requesterDeleteBatchId,
+  allowSplitBill = false,
 }) => {
   const normalizeBatchId = (value) =>
     typeof value === "string"
@@ -355,6 +356,14 @@ const CalendarOverview = ({
   const [requesterDialogFeedback, setRequesterDialogFeedback] = useState(null);
   const [requesterDialogSubmitting, setRequesterDialogSubmitting] =
     useState(false);
+  const [splitBatch, setSplitBatch] = useState(null);
+  const [splitBrojDok, setSplitBrojDok] = useState("");
+  const [splitArrivalDate, setSplitArrivalDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
+  const [splitFeedback, setSplitFeedback] = useState(null);
+  const [splitSubmitting, setSplitSubmitting] = useState(false);
+  const [splitResult, setSplitResult] = useState(null);
   const confirmedBatches = useMemo(
     () => aggregateConfirmedRequestsByBatch(confirmedRequests),
     [confirmedRequests]
@@ -576,6 +585,76 @@ const CalendarOverview = ({
     requesterRescheduleBatch,
     resetRequesterDialog,
   ]);
+
+  const handleOpenSplitDialog = useCallback(
+    (batch) => {
+      if (!allowSplitBill || !batch?.BatchId) return;
+      setSplitBatch(batch);
+      setSplitBrojDok("");
+      setSplitArrivalDate(new Date().toISOString().split("T")[0]);
+      setSplitFeedback(null);
+      setSplitResult(null);
+    },
+    [allowSplitBill]
+  );
+
+  const handleCloseSplitDialog = useCallback(() => {
+    if (splitSubmitting) return;
+    setSplitBatch(null);
+    setSplitBrojDok("");
+    setSplitArrivalDate(new Date().toISOString().split("T")[0]);
+    setSplitFeedback(null);
+    setSplitResult(null);
+  }, [splitSubmitting]);
+
+  const handleSubmitSplit = useCallback(async () => {
+    if (!splitBatch?.BatchId) {
+      setSplitFeedback({
+        severity: "error",
+        message: "Batch ID mungon.",
+      });
+      return;
+    }
+    if (!splitBrojDok) {
+      setSplitFeedback({
+        severity: "error",
+        message: "Ju lutemi vendosni Broj Dok.",
+      });
+      return;
+    }
+    if (!splitArrivalDate) {
+      setSplitFeedback({
+        severity: "error",
+        message: "Ju lutemi zgjidhni datën e re të arritjes.",
+      });
+      return;
+    }
+
+    setSplitSubmitting(true);
+    setSplitFeedback(null);
+    setSplitResult(null);
+
+    try {
+      const response = await API.post(
+        `/imports/batch/${splitBatch.BatchId}/separate-bill`,
+        {
+          brojDok: splitBrojDok?.trim() || null,
+          arrivalDate: splitArrivalDate,
+        }
+      );
+      setSplitResult(response.data);
+      await loadRequests();
+    } catch (error) {
+      setSplitFeedback({
+        severity: "error",
+        message:
+          error?.response?.data?.message ||
+          "Nuk mundëm të marrim artikujt e dokumentit. Ju lutemi provoni përsëri.",
+      });
+    } finally {
+      setSplitSubmitting(false);
+    }
+  }, [splitBatch, splitBrojDok, splitArrivalDate, loadRequests]);
   const confirmedByDate = useMemo(() => {
     const grouped = new Map();
     confirmedBatches.forEach((request) => {
@@ -1100,6 +1179,14 @@ const CalendarOverview = ({
                   batch.BatchId &&
                   normalizeBatchId(requesterDeleteBatchId) ===
                     normalizeBatchId(batch.BatchId);
+                const documentReference = batch.DocumentReference;
+                const docRole = documentReference?.role || "delivered";
+                const documentSummaryEntries = Array.isArray(
+                  documentReference?.summary
+                )
+                  ? documentReference.summary
+                  : null;
+                const docSummaryKey = `${batch.BatchKey || batch.ID || index}-doc-summary`;
 
                 const chipItems = [
                   actualArrivalDateLabel
@@ -1124,6 +1211,16 @@ const CalendarOverview = ({
                     ? `Confirmed by ${batch.ConfirmedBy}`
                     : null,
                 ].filter(Boolean);
+                if (documentReference?.number) {
+                  chipItems.push(
+                    docRole === "remaining"
+                      ? `Split remaining: ${documentReference.number}`
+                      : `Split delivered: ${documentReference.number}`
+                  );
+                }
+                if (documentReference?.number) {
+                  chipItems.push(`Split doc: ${documentReference.number}`);
+                }
 
                 const detailItems = [
                   articlesDetail,
@@ -1210,6 +1307,24 @@ const CalendarOverview = ({
                       sx={{ width: "100%", maxWidth: "100%" }}
                       secondary={
                         <Stack spacing={0.75}>
+                          {documentReference?.number && (
+                            <Typography
+                              variant="caption"
+                              color="info.main"
+                              sx={{ fontWeight: 600 }}
+                            >
+                              {docRole === "remaining"
+                                ? `Remaining from bill ${documentReference.number}`
+                                : `Delivered from bill ${documentReference.number}`}
+                              {documentReference.relatedBatchId && (
+                                <>
+                                  {" "}
+                                  • Linked batch:{" "}
+                                  {formatBatchCode(documentReference.relatedBatchId)}
+                                </>
+                              )}
+                            </Typography>
+                          )}
                           {chipItems.length > 0 && (
                             <Stack
                               direction="row"
@@ -1288,10 +1403,74 @@ const CalendarOverview = ({
                           </Collapse>
                         </>
                       )}
+                          {documentSummaryEntries &&
+                            documentSummaryEntries.length > 0 && (
+                              <>
+                                <Button
+                                  type="button"
+                                  size="small"
+                                  onClick={() => toggleExpanded(docSummaryKey)}
+                                  sx={{ alignSelf: "flex-start" }}
+                                >
+                                  {isExpanded(docSummaryKey)
+                                    ? "Hide bill differences"
+                                    : "Bill differences"}
+                                </Button>
+                                <Collapse in={isExpanded(docSummaryKey)}>
+                                  <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+                                    {documentSummaryEntries.map((entry) => (
+                                      <Stack
+                                        key={`${docSummaryKey}-${entry.article}`}
+                                        direction="row"
+                                        spacing={1}
+                                        justifyContent="space-between"
+                                      >
+                                        <Typography fontWeight={600}>
+                                          {entry.article}
+                                        </Typography>
+                                        <Typography
+                                          variant="caption"
+                                          color="text.secondary"
+                                        >
+                                          Doc: {entry.documentQuantity ?? 0} |
+                                          Import: {entry.importQuantity ?? 0} |
+                                          Δ {entry.remainingQuantity ?? 0}
+                                          {typeof entry.documentPallets ===
+                                            "number" &&
+                                            typeof entry.importPallets ===
+                                              "number" && (
+                                              <>
+                                                {" "}
+                                                | Paleta:{" "}
+                                                {entry.documentPallets ?? 0} /{" "}
+                                                {entry.importPallets ?? 0} (Δ{" "}
+                                                {entry.remainingPallets ?? 0})
+                                              </>
+                                            )}
+                                        </Typography>
+                                      </Stack>
+                                    ))}
+                                    {Array.isArray(
+                                      documentReference?.unmatched
+                                    ) &&
+                                      documentReference.unmatched.length >
+                                        0 && (
+                                        <Alert severity="warning">
+                                          {`Artikuj pa përputhje: ${documentReference.unmatched.join(
+                                            ", "
+                                          )}`}
+                                        </Alert>
+                                      )}
+                                  </Stack>
+                                </Collapse>
+                              </>
+                            )}
                       {(canEditArrival ||
                         canRequesterReschedule ||
                         (canRequesterManageBatch &&
-                          (onRequesterEditBatch || onRequesterDeleteBatch))) && (
+                          (onRequesterEditBatch ||
+                            onRequesterDeleteBatch ||
+                            allowSplitBill))) && (
                         <Stack
                           direction={{ xs: "column", sm: "row" }}
                           spacing={1}
@@ -1354,6 +1533,18 @@ const CalendarOverview = ({
                                 {requesterDeleteInFlight
                                   ? "Deleting..."
                                   : "Delete"}
+                              </Button>
+                            )}
+                          {canRequesterManageBatch &&
+                            allowSplitBill &&
+                            batch.BatchId && (
+                              <Button
+                                type="button"
+                                size="small"
+                                variant="outlined"
+                                onClick={() => handleOpenSplitDialog(batch)}
+                              >
+                                Split bill
                               </Button>
                             )}
                         </Stack>
@@ -1652,6 +1843,128 @@ const CalendarOverview = ({
         )}
       </Stack>
       </Paper>
+      {allowSplitBill && (
+        <Dialog
+          open={Boolean(splitBatch)}
+          onClose={handleCloseSplitDialog}
+          fullWidth
+          maxWidth="md"
+        >
+          <DialogTitle>Split bill for import</DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={3}>
+              {splitBatch && (
+                <Typography variant="body2" color="text.secondary">
+                  Dokument për{" "}
+                  <Typography component="span" fontWeight={600}>
+                    {splitBatch.Importer ?? "këtë import"}
+                  </Typography>{" "}
+                  ({formatLongDate(splitBatch.ArrivalDate) || "pa datë"}).
+                </Typography>
+              )}
+              {splitFeedback && (
+                <Alert severity={splitFeedback.severity}>
+                  {splitFeedback.message}
+                </Alert>
+              )}
+              <Stack spacing={2}>
+                <TextField
+                  label="Broj Dok"
+                  type="number"
+                  value={splitBrojDok}
+                  onChange={(event) => setSplitBrojDok(event.target.value)}
+                  required
+                  fullWidth
+                />
+                <TextField
+                  label="Data e re e arritjes"
+                  type="date"
+                  value={splitArrivalDate}
+                  onChange={(event) => setSplitArrivalDate(event.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                  required
+                />
+              </Stack>
+              {splitResult && (
+                <Stack spacing={2}>
+                  <Typography variant="subtitle2">
+                    Përmbledhje sipas artikujve
+                  </Typography>
+                  {Array.isArray(splitResult.summary) &&
+                  splitResult.summary.length > 0 ? (
+                    <List disablePadding>
+                      {splitResult.summary.map((line) => (
+                        <ListItem
+                          key={line.article}
+                          divider
+                          alignItems="flex-start"
+                          sx={{ px: 0 }}
+                        >
+                          <ListItemText
+                            primary={
+                              <Stack
+                                direction="row"
+                                spacing={1}
+                                justifyContent="space-between"
+                              >
+                                <Typography fontWeight={600}>
+                                  {line.article}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Import boxes: {line.importQuantity ?? 0}
+                                </Typography>
+                              </Stack>
+                            }
+                            secondary={
+                              <Typography variant="caption" color="text.secondary">
+                                Dokument: {line.documentQuantity ?? 0} | Mbetje:{" "}
+                                {line.remainingQuantity ?? 0}
+                                {typeof line.importPallets === "number" &&
+                                  typeof line.documentPallets === "number" && (
+                                    <>
+                                      {" "}
+                                      | Paleta: {line.documentPallets ?? 0} /{" "}
+                                      {line.importPallets ?? 0} (mbetje{" "}
+                                      {line.remainingPallets ?? 0})
+                                    </>
+                                  )}
+                              </Typography>
+                            }
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      Nuk ka të dhëna të dokumentit për këtë kërkesë.
+                    </Typography>
+                  )}
+                  {splitResult.unmatchedDocumentArticles?.length > 0 && (
+                    <Alert severity="warning">
+                      {`Artikuj pa përputhje: ${splitResult.unmatchedDocumentArticles.join(
+                        ", "
+                      )}`}
+                    </Alert>
+                  )}
+                </Stack>
+              )}
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button onClick={handleCloseSplitDialog} disabled={splitSubmitting}>
+              Mbyll
+            </Button>
+            <Button
+              onClick={handleSubmitSplit}
+              variant="contained"
+              disabled={splitSubmitting}
+            >
+              {splitSubmitting ? "Duke ngarkuar..." : "Gjenero"}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
       {allowArrivalUpdates && (
         <Dialog
           open={Boolean(activeArrivalBatch)}

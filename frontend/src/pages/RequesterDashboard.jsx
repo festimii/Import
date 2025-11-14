@@ -1527,6 +1527,7 @@ export default function RequesterDashboard() {
             onRequesterDeleteBatch={handleCalendarDeleteBatch}
             requesterEditBatchId={editingSubmission?.batchId ?? null}
             requesterDeleteBatchId={deletingBatchId}
+            allowSplitBill
           />
 
           {latestItems.length > 0 && (

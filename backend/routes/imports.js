@@ -5,6 +5,7 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { poolPromise } from "../db.js";
 import { secondaryPoolPromise } from "../db_WMS.js"; // secondary DB (pallet calculations)
+import { docPoolPromise } from "../db_wtrgksvf.js";
 import { verifyRole } from "../middleware/auth.js";
 import { dispatchNotificationEvent } from "../services/notifications.js";
 import { ensureWmsOrdersSchema } from "../services/wmsOrdersSync.js";
@@ -173,6 +174,43 @@ const formatBillName = (record = {}) => {
   return "Porosi importi";
 };
 
+const annotateSplitComment = ({
+  baseComment,
+  documentNumber,
+  role,
+  relatedBatchId,
+}) => {
+  const safeComment = sanitizeComment(baseComment);
+  const normalizedDocument = trimString(documentNumber);
+
+  if (!normalizedDocument) {
+    return safeComment;
+  }
+
+  const rolePrefix =
+    role === "remaining"
+      ? "Ndarje nga dokumenti"
+      : "Dorëzuar sipas dokumentit";
+
+  const parts = [`${rolePrefix} ${normalizedDocument}`];
+  const batchCode = formatBatchCode(relatedBatchId);
+  if (batchCode) {
+    parts.push(`batch ${batchCode}`);
+  }
+
+  const note = parts.join(" | ");
+
+  if (!safeComment) {
+    return note;
+  }
+
+  if (safeComment.includes(normalizedDocument)) {
+    return safeComment;
+  }
+
+  return sanitizeComment(`${safeComment} | ${note}`);
+};
+
 const describeStatusInAlbanian = (status) => {
   const normalized = trimString(status)?.toLowerCase();
 
@@ -224,6 +262,133 @@ const normalizeGuidInput = (value) => {
     return isValidGuid(formatted) ? formatted : null;
   }
   return null;
+};
+
+const resolveDocumentArticleCode = (line = {}) => {
+  return normalizeArticleCode(
+    line.Sifra_Art ??
+      line.Sifra_Art_Kup ??
+      line.Alt_Sifra ??
+      line.Sifra_Artikel ??
+      line.SifraArt ??
+      line.Artikulli
+  );
+};
+
+const extractDocumentQuantity = (line = {}) => {
+  const candidates = [
+    line.Kolic,
+    line.Kolic_Ed1,
+    line.Kolic_Ed2,
+    line.Kolic_Ed3,
+    line.Kolic_Ed4,
+  ];
+
+  for (const candidate of candidates) {
+    const numericValue = Number(candidate);
+    if (Number.isFinite(numericValue)) {
+      return numericValue;
+    }
+  }
+
+  return 0;
+};
+
+const toSqlDateString = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().split("T")[0];
+  }
+  if (typeof value === "string" && value.trim().length >= 10) {
+    return value.trim().slice(0, 10);
+  }
+  return null;
+};
+
+const DOCUMENT_DATE_FIELDS = [
+  "Datum_Dosp",
+  "DatumDosp",
+  "Datum_Dok",
+  "DatumDok",
+  "Datum_Fiskal",
+  "DatumFiskal",
+  "Datum_Fature",
+  "DatumFature",
+  "Datum",
+  "Datumi",
+  "Data_Dosp",
+  "DataDosp",
+  "Data_Dok",
+  "DataDok",
+  "Datum_Dokumentit",
+  "DatumDokumentit",
+];
+
+const extractDocumentArrivalDate = (line = {}) => {
+  for (const field of DOCUMENT_DATE_FIELDS) {
+    if (line[field] === undefined || line[field] === null) {
+      continue;
+    }
+    const normalized = toSqlDateString(line[field]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+};
+
+const findFirstDocumentArrivalDate = (lines = []) => {
+  for (const line of lines) {
+    const normalized = extractDocumentArrivalDate(line);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+};
+
+const aggregateImportItemsByArticle = (items = []) => {
+  const map = new Map();
+  for (const item of items) {
+    const articleCode = normalizeArticleCode(item.Article);
+    if (!articleCode) continue;
+
+    const entry =
+      map.get(articleCode) || {
+        boxes: 0,
+        pallets: 0,
+        template: {
+          importer:
+            trimString(item.Importer ?? item.Importuesi ?? item.importer) ??
+            null,
+          requestDateSql: toSqlDateString(item.RequestDate),
+          arrivalDateSql: toSqlDateString(item.PlannedArrivalDate),
+          comment: sanitizeComment(item.Comment),
+        },
+      };
+
+    entry.boxes += numberOrNull(item.BoxCount) ?? 0;
+    entry.pallets += numberOrNull(item.PalletCount) ?? 0;
+
+    if (!entry.template.importer) {
+      entry.template.importer =
+        trimString(item.Importer ?? item.Importuesi ?? item.importer) ??
+        entry.template.importer;
+    }
+    if (!entry.template.requestDateSql) {
+      entry.template.requestDateSql = toSqlDateString(item.RequestDate);
+    }
+    if (!entry.template.arrivalDateSql) {
+      entry.template.arrivalDateSql = toSqlDateString(item.PlannedArrivalDate);
+    }
+    if (!entry.template.comment) {
+      entry.template.comment = sanitizeComment(item.Comment);
+    }
+
+    map.set(articleCode, entry);
+  }
+  return map;
 };
 
 const describeActionDetails = (action, metadata = {}) => {
@@ -385,12 +550,17 @@ const normalizePalletCalculation = (row = {}) => {
   };
 };
 
-const calculatePalletization = async (pool, { article, boxCount }) => {
-  const result = await pool
+const calculatePalletization = async (
+  pool,
+  { article, boxCount, pieceCount = null }
+) => {
+  const request = pool
     .request()
     .input("Sifra_Art", article)
-    .input("OrderBoxes", boxCount)
-    .execute("sp_CalcPalletKPIs_ForOrder");
+    .input("OrderBoxes", boxCount ?? null)
+    .input("OrderPieces", pieceCount ?? null);
+
+  const result = await request.execute("sp_CalcPalletKPIs_ForOrder");
 
   const calculationRow = result.recordset?.[0];
   if (!calculationRow) {
@@ -398,6 +568,43 @@ const calculatePalletization = async (pool, { article, boxCount }) => {
   }
 
   return normalizePalletCalculation(calculationRow);
+};
+
+const deriveBoxesFromCalculation = (calculation) => {
+  if (!calculation || typeof calculation !== "object") {
+    return null;
+  }
+
+  const boxesPerPallet = numberOrNull(calculation.boxesPerPallet) ?? 0;
+  const fullPallets = numberOrNull(calculation.fullPallets) ?? 0;
+  const remainingBoxes = numberOrNull(calculation.remainingBoxes) ?? 0;
+
+  if (boxesPerPallet > 0) {
+    return fullPallets * boxesPerPallet + remainingBoxes;
+  }
+
+  return remainingBoxes || null;
+};
+
+const buildSplitNormalizedItem = ({
+  template = {},
+  article,
+  boxCount,
+  arrivalDateSql,
+}) => {
+  if (!boxCount || boxCount <= 0) {
+    return null;
+  }
+
+  return {
+    article,
+    boxCount,
+    importer: template.importer ?? null,
+    requestDateSql:
+      template.requestDateSql || template.arrivalDateSql || arrivalDateSql,
+    arrivalDateSql,
+    comment: template.comment ?? null,
+  };
 };
 
 const KAT_ART_TABLE = "KatArt";
@@ -568,7 +775,7 @@ const NUMERIC_FIELDS = [
   "TotalShipmentVolumeM3",
 ];
 
-const mapArticles = (records) =>
+const mapArticles = (records, batchDocuments = null) =>
   records.map((record) => {
     const mapped = {
       ...record,
@@ -597,8 +804,108 @@ const mapArticles = (records) =>
     mapped.ArrivalDate =
       mapped.ActualArrivalDate ?? plannedArrival ?? rawArrival ?? null;
 
+    if (batchDocuments && record.BatchId) {
+      const docKey = String(record.BatchId).toLowerCase();
+      if (batchDocuments.has(docKey)) {
+        const doc = batchDocuments.get(docKey);
+        let payload = null;
+        if (doc.payload) {
+          payload = doc.payload;
+        }
+
+        const splitInfo = payload?.split || {};
+        mapped.DocumentReference = {
+          number: doc.documentNumber,
+          arrivalDate: doc.arrivalDate ?? null,
+          summary: payload?.summary ?? null,
+          lines: payload?.lines ?? null,
+          unmatched: payload?.unmatchedDocumentArticles ?? null,
+          generatedAt: payload?.generatedAt ?? null,
+          role: splitInfo.role || "delivered",
+          relatedBatchId: splitInfo.relatedBatchId || splitInfo.sourceBatchId || null,
+        };
+      }
+    }
+
     return mapped;
   });
+
+const parseDocumentPayload = (value) => {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return { raw: value };
+  }
+};
+
+const fetchBatchDocumentMap = async (pool) => {
+  try {
+    const result = await pool.request().query(`
+      IF OBJECT_ID('dbo.ImportBatchDocuments', 'U') IS NULL
+        SELECT CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId, NULL AS DocumentNumber, NULL AS Payload, NULL AS ArrivalDate
+      ELSE
+        SELECT BatchId, DocumentNumber, Payload, ArrivalDate
+        FROM dbo.ImportBatchDocuments
+    `);
+
+    const map = new Map();
+    for (const row of result.recordset || []) {
+      if (!row?.BatchId || !row?.DocumentNumber) continue;
+      const key = String(row.BatchId).toLowerCase();
+      map.set(key, {
+        documentNumber: row.DocumentNumber,
+        arrivalDate: row.ArrivalDate ?? null,
+        payload: parseDocumentPayload(row.Payload),
+      });
+    }
+    return map;
+  } catch (error) {
+    console.error("Batch document fetch error:", error?.message || error);
+    return new Map();
+  }
+};
+
+const storeBatchDocumentSnapshot = async ({
+  pool,
+  batchId,
+  documentNumber,
+  payload,
+  arrivalDate,
+  username,
+}) => {
+  if (!pool || !batchId || !documentNumber) {
+    return;
+  }
+
+  const executor = pool.request();
+  executor.input("BatchId", sql.UniqueIdentifier, batchId);
+  executor.input("DocumentNumber", sql.NVarChar(50), documentNumber);
+  executor.input(
+    "Payload",
+    sql.NVarChar(sql.MAX),
+    typeof payload === "string" ? payload : JSON.stringify(payload)
+  );
+  executor.input("ArrivalDate", sql.Date, arrivalDate || null);
+  executor.input("CreatedBy", sql.NVarChar(128), username || null);
+
+  await executor.query(`
+    MERGE dbo.ImportBatchDocuments AS target
+    USING (SELECT @BatchId AS BatchId) AS source
+    ON target.BatchId = source.BatchId
+    WHEN MATCHED THEN
+      UPDATE SET
+        DocumentNumber = @DocumentNumber,
+        Payload = @Payload,
+        ArrivalDate = @ArrivalDate,
+        CreatedAt = SYSUTCDATETIME(),
+        CreatedBy = @CreatedBy
+    WHEN NOT MATCHED THEN
+      INSERT (BatchId, DocumentNumber, Payload, ArrivalDate, CreatedAt, CreatedBy)
+      VALUES (@BatchId, @DocumentNumber, @Payload, @ArrivalDate, SYSUTCDATETIME(), @CreatedBy);
+  `);
+};
 
 const mapWmsOrders = (records) =>
   records.map((record) => {
@@ -1134,11 +1441,30 @@ const ensureImportRequestEnhancements = () => {
         `);
       };
 
+      const ensureBatchDocumentTable = async () => {
+        await pool.request().query(`
+          IF OBJECT_ID('dbo.ImportBatchDocuments', 'U') IS NULL
+          BEGIN
+            CREATE TABLE dbo.ImportBatchDocuments (
+              BatchId UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+              DocumentNumber NVARCHAR(50) NOT NULL,
+              Payload NVARCHAR(MAX) NULL,
+              ArrivalDate DATE NULL,
+              CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_ImportBatchDocuments_CreatedAt DEFAULT (SYSUTCDATETIME()),
+              CreatedBy NVARCHAR(128) NULL
+            );
+            CREATE INDEX IX_ImportBatchDocuments_DocumentNumber
+              ON dbo.ImportBatchDocuments (DocumentNumber);
+          END;
+        `);
+      };
+
       await ensureBatchColumn();
       await ensureArticleNameColumn();
       await ensureActualArrivalColumn();
       await ensureDetailsTable();
       await ensureRequestLogTable();
+      await ensureBatchDocumentTable();
     })();
 
     ensureEnhancementsPromise = runner
@@ -2120,7 +2446,9 @@ router.get(
                 FROM ImportRequests
                 WHERE Useri = @Requester
                 ORDER BY CreatedAt DESC`);
-      res.json(mapArticles(result.recordset));
+      const batchDocuments =
+        hasBatchId ? await fetchBatchDocumentMap(pool) : null;
+      res.json(mapArticles(result.recordset, batchDocuments));
     } catch (err) {
       console.error("Fetch requester imports error:", err.message);
       res.status(500).json({ message: "Server error" });
@@ -2168,7 +2496,9 @@ router.get("/", verifyRole(["confirmer"]), async (req, res) => {
               FROM ImportRequests
               WHERE Status = 'pending'
               ORDER BY CreatedAt DESC`);
-    res.json(mapArticles(result.recordset));
+    const batchDocuments =
+      hasBatchId ? await fetchBatchDocumentMap(pool) : null;
+    res.json(mapArticles(result.recordset, batchDocuments));
   } catch (err) {
     console.error("Fetch error:", err.message);
     res.status(500).json({ message: "Server error" });
@@ -2219,8 +2549,10 @@ router.get(
               FROM ImportRequests
               WHERE Status = 'approved'
               ORDER BY DataArritjes ASC, CreatedAt DESC`);
-      res.json(mapArticles(result.recordset));
-    } catch (err) {
+    const batchDocuments =
+      hasBatchId ? await fetchBatchDocumentMap(pool) : null;
+    res.json(mapArticles(result.recordset, batchDocuments));
+  } catch (err) {
       console.error("Fetch approved error:", err.message);
       res.status(500).json({ message: "Server error" });
     }
@@ -2289,8 +2621,14 @@ router.get(
                   AND OrderTypeCode = 51`),
       ]);
 
+      const batchDocuments =
+        hasBatchId ? await fetchBatchDocumentMap(pool) : null;
+
       res.json({
-        confirmedImports: mapArticles(confirmedResult.recordset),
+        confirmedImports: mapArticles(
+          confirmedResult.recordset,
+          batchDocuments
+        ),
         wmsOrders: mapWmsOrders(wmsResult.recordset),
       });
     } catch (err) {
@@ -3042,7 +3380,7 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
   }
   const batchId = normalizedBatchId;
 
-  const { importer, arrivalDate, requestDate, comment, items } = req.body || {};
+ const { importer, arrivalDate, requestDate, comment, items } = req.body || {};
   const importerValue = trimString(importer);
   if (!importerValue) {
     return res
@@ -3260,22 +3598,555 @@ router.delete(
       actor: req.user.username,
     });
 
-    await dispatchNotificationEvent(pool, {
-      requestId: referenceRecord.ID,
-      message: copy.message,
-      type: "request_deleted",
-      roles: ["admin", "confirmer"],
-      excludeUsername: req.user.username,
-      push: {
-        title: copy.pushTitle,
-        body: copy.pushBody,
-        data: { intent: "request_deleted" },
-        tag: `request-${referenceRecord.ID}-deleted`,
-      },
-    });
+    try {
+      await dispatchNotificationEvent(pool, {
+        requestId: referenceRecord.ID,
+        message: copy.message,
+        type: "request_deleted",
+        roles: ["admin", "confirmer"],
+        excludeUsername: req.user.username,
+        push: {
+          title: copy.pushTitle,
+          body: copy.pushBody,
+          data: { intent: "request_deleted" },
+          tag: `request-${referenceRecord.ID}-deleted`,
+        },
+      });
+    } catch (notificationError) {
+      console.error(
+        "Request delete notification error:",
+        notificationError?.message || notificationError
+      );
+    }
 
     res.json({ deleted: existingRecordsResult.recordset.length });
   }
 );
+
+router.post(
+  "/batch/:batchId/separate-bill",
+  verifyRole(["requester", "confirmer", "admin"]),
+  async (req, res) => {
+    const normalizedBatchId = normalizeGuidInput(req.params.batchId);
+    if (!isValidGuid(normalizedBatchId)) {
+      return res.status(400).json({ message: "Batch ID i pavlefshëm." });
+    }
+
+    const { brojDok, arrivalDate } = req.body || {};
+    const sifraOe = 201;
+    const sifraDok = 132;
+    const sifraPrim = null;
+    const imaDodatna = null;
+    const podrediOpc = "R";
+
+    const brojDokValue =
+      typeof brojDok === "string"
+        ? brojDok.trim()
+        : brojDok === null || brojDok === undefined
+        ? null
+        : String(brojDok);
+
+    if (!brojDokValue) {
+      return res.status(400).json({
+        message: "Broj_Dok (numri i dokumentit) është i detyrueshëm.",
+      });
+    }
+    if (!arrivalDate) {
+      return res
+        .status(400)
+        .json({ message: "Data e re e arritjes është e detyrueshme." });
+    }
+
+    try {
+      const [docPool, pool] = await Promise.all([
+        docPoolPromise,
+        poolPromise,
+      ]);
+
+    const [documentLines, secondaryPool] = await Promise.all([
+      (async () => {
+        try {
+          const documentRequest = docPool
+            .request()
+            .input("Sifra_oe", sql.Int, Number(sifraOe) || null)
+            .input("Sifra_dok", sql.Int, Number(sifraDok) || null)
+            .input("Broj_Dok", sql.NVarChar(50), brojDokValue)
+            .input("Sifra_Prim", sql.NVarChar(50), sifraPrim || null)
+            .input("Imadodatna", sql.NVarChar(50), imaDodatna || null)
+            .input("PodrediOpc", sql.NVarChar(5), podrediOpc || null);
+
+          const docResult = await documentRequest.execute(
+            "[dbo].[SP_StavkiPoDok]"
+          );
+          if (
+            Array.isArray(docResult.recordsets) &&
+            docResult.recordsets.length > 0 &&
+            Array.isArray(docResult.recordsets[0])
+          ) {
+            return docResult.recordsets[0];
+          }
+          if (docResult.recordset) {
+            return docResult.recordset;
+          }
+          return [];
+        } catch (docError) {
+          console.error("Document retrieval error:", docError);
+          throw docError;
+        }
+      })(),
+      secondaryPoolPromise,
+    ]);
+
+    if (!documentLines || documentLines.length === 0) {
+      console.warn(
+        "SP_StavkiPoDok returned no rows:",
+        JSON.stringify({
+          sifraOe,
+          sifraDok,
+          brojDok: brojDokValue,
+          sifraPrim,
+          imaDodatna,
+          podrediOpc,
+        })
+      );
+      return res.status(404).json({
+        message:
+          "Dokumenti nuk u gjet ose nuk ka rreshta. Ju lutemi verifikoni parametrat.",
+        details: { sifraOe, sifraDok, brojDok: brojDokValue },
+      });
+    }
+
+    const importItemsResult = await pool
+      .request()
+      .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
+      .query(`SELECT ID,
+                     Artikulli AS Article,
+                     NumriPakove AS BoxCount,
+                     NumriPaletave AS PalletCount,
+                     DataArritjes AS PlannedArrivalDate
+              FROM dbo.ImportRequests
+              WHERE BatchId = @BatchId`);
+
+    const importItems = importItemsResult.recordset || [];
+    if (importItems.length === 0) {
+      return res.status(404).json({ message: "Porosia nuk u gjet." });
+    }
+    const importTotals = aggregateImportItemsByArticle(importItems);
+    const originalRequestDateSql =
+      toSqlDateString(importItems[0]?.RequestDate) || null;
+    const originalArrivalDateSql =
+      toSqlDateString(importItems[0]?.PlannedArrivalDate) || null;
+    const documentArrivalDateSql =
+      findFirstDocumentArrivalDate(documentLines);
+    const todaySql = toSqlDateString(new Date());
+
+    const documentTotals = new Map();
+
+    const lines = await Promise.all(
+      documentLines.map(async (line, index) => {
+        const normalizedArticle = resolveDocumentArticleCode(line);
+        const documentPieces = extractDocumentQuantity(line);
+        let documentBoxes = null;
+        let documentPallets = null;
+        let conversionError = null;
+
+        if (documentPieces === 0) {
+          documentBoxes = 0;
+        } else if (normalizedArticle && documentPieces > 0) {
+          try {
+            const calculation = await calculatePalletization(secondaryPool, {
+              article: normalizedArticle,
+              boxCount: null,
+              pieceCount: Math.max(
+                0,
+                Math.round(Number(documentPieces) || 0)
+              ),
+            });
+            const derivedBoxes = deriveBoxesFromCalculation(calculation);
+            documentBoxes =
+              typeof derivedBoxes === "number"
+                ? Number(derivedBoxes.toFixed(6))
+                : null;
+            documentPallets =
+              typeof calculation.totalPalletPositions === "number"
+                ? Number(calculation.totalPalletPositions.toFixed(6))
+                : null;
+          } catch (conversionIssue) {
+            conversionError =
+              conversionIssue?.message ||
+              "Nuk mundëm të llogarisim kutitë për këtë artikull.";
+          }
+        }
+
+        if (normalizedArticle) {
+          const totalsEntry =
+            documentTotals.get(normalizedArticle) || {
+              pieces: 0,
+              boxes: 0,
+              pallets: 0,
+            };
+          totalsEntry.pieces += documentPieces;
+          if (documentBoxes !== null) {
+            totalsEntry.boxes += documentBoxes;
+          }
+          if (documentPallets !== null) {
+            totalsEntry.pallets += documentPallets;
+          }
+          documentTotals.set(normalizedArticle, totalsEntry);
+        }
+
+        const importStats =
+          normalizedArticle && importTotals.has(normalizedArticle)
+            ? importTotals.get(normalizedArticle)
+            : null;
+        const importQuantity = importStats?.boxes ?? null;
+        const importPallets = importStats?.pallets ?? null;
+
+        const boxesToCompare =
+          documentBoxes === null && conversionError
+            ? null
+            : documentBoxes ?? documentPieces;
+
+        return {
+          index: line.RBr ?? index + 1,
+          article: line.Sifra_Art ?? null,
+          normalizedArticle,
+          description:
+            line.ImeMat ||
+            line.ImeArt ||
+            line.ImeArt2 ||
+            line.Alt_Ime ||
+            line.Alt_Ime2 ||
+            null,
+          documentPieces,
+          documentBoxes,
+          documentPallets,
+          importQuantity,
+          importPallets,
+          remainingQuantity:
+            importQuantity === null || boxesToCompare === null
+              ? null
+              : Number((importQuantity - boxesToCompare).toFixed(6)),
+          remainingPallets:
+            importPallets === null || documentPallets === null
+              ? null
+              : Number((importPallets - documentPallets).toFixed(6)),
+          conversionError,
+        };
+      })
+    );
+
+    const summary = Array.from(importTotals.entries()).map(
+      ([articleCode, importStats]) => {
+        const docStats = documentTotals.get(articleCode) || {
+          boxes: 0,
+          pallets: 0,
+        };
+
+        return {
+          article: articleCode,
+          importQuantity: Number(importStats.boxes.toFixed(6)),
+          documentQuantity: Number(docStats.boxes.toFixed(6)),
+          remainingQuantity: Number(
+            (importStats.boxes - docStats.boxes).toFixed(6)
+          ),
+          importPallets: Number(importStats.pallets.toFixed(6)),
+          documentPallets: Number(docStats.pallets.toFixed(6)),
+          remainingPallets: Number(
+            (importStats.pallets - docStats.pallets).toFixed(6)
+          ),
+        };
+      }
+    );
+
+    const unmatchedDocumentArticles = lines
+      .filter((line) => line.importQuantity === null)
+      .map((line) => line.article || line.normalizedArticle)
+      .filter(Boolean);
+
+    let arrivalDateSqlValue;
+    try {
+      arrivalDateSqlValue = parseSqlDateOrFallback(
+        arrivalDate,
+        "Data e arritjes nuk është e vlefshme.",
+        importItems[0]?.PlannedArrivalDate || new Date()
+      );
+    } catch (dateError) {
+      return res.status(400).json({ message: dateError.message });
+    }
+
+    const deliveredItems = [];
+    const remainingItems = [];
+
+    for (const [articleCode, importStats] of importTotals.entries()) {
+      const docStats = documentTotals.get(articleCode) || {
+        boxes: 0,
+      };
+      const deliveredBoxes = Math.min(importStats.boxes, docStats.boxes);
+      const remainingBoxes = Math.max(0, importStats.boxes - docStats.boxes);
+      const template = importStats.template || {};
+
+      const deliveredArrivalSql =
+        template.arrivalDateSql ||
+        originalArrivalDateSql ||
+        documentArrivalDateSql ||
+        arrivalDateSqlValue ||
+        todaySql;
+      const deliveredTemplate = {
+        ...template,
+        arrivalDateSql: deliveredArrivalSql,
+      };
+
+      const deliveredItem = buildSplitNormalizedItem({
+        template: deliveredTemplate,
+        article: articleCode,
+        boxCount: deliveredBoxes,
+        arrivalDateSql: deliveredArrivalSql,
+      });
+      if (deliveredItem) {
+        deliveredItems.push(deliveredItem);
+      }
+
+      const remainingTemplate = {
+        ...template,
+        requestDateSql: template.requestDateSql || todaySql,
+        arrivalDateSql: arrivalDateSqlValue,
+        comment: annotateSplitComment({
+          baseComment: template.comment,
+          documentNumber: brojDokValue,
+          role: "remaining",
+          relatedBatchId: normalizedBatchId,
+        }),
+      };
+
+      const remainingItem = buildSplitNormalizedItem({
+        template: remainingTemplate,
+        article: articleCode,
+        boxCount: remainingBoxes,
+        arrivalDateSql: arrivalDateSqlValue,
+      });
+      if (remainingItem) {
+        remainingItems.push(remainingItem);
+      }
+    }
+
+    if (deliveredItems.length === 0) {
+      return res.status(400).json({
+        message:
+          "Dokumenti nuk përputhet me artikujt e importit. Nuk u gjet asgjë për t'u shënuar si e dorëzuar.",
+      });
+    }
+
+    const importerFallback =
+      trimString(importItems[0]?.Importer ?? importItems[0]?.Importuesi) ??
+      "Unknown importer";
+    const defaultCommentFallback =
+      sanitizeComment(importItems[0]?.Comment) ?? null;
+    const splitCommentFallback = annotateSplitComment({
+      baseComment: defaultCommentFallback,
+      documentNumber: brojDokValue,
+      role: "remaining",
+      relatedBatchId: normalizedBatchId,
+    });
+
+    const deliveredRequestDateFallback =
+      deliveredItems[0]?.requestDateSql ||
+      originalRequestDateSql ||
+      todaySql ||
+      arrivalDateSqlValue;
+    const deliveredArrivalDateFallback =
+      deliveredItems[0]?.arrivalDateSql ||
+      originalArrivalDateSql ||
+      documentArrivalDateSql ||
+      todaySql ||
+      arrivalDateSqlValue;
+
+    const remainingRequestDateFallback =
+      remainingItems[0]?.requestDateSql || todaySql || arrivalDateSqlValue;
+    const remainingArrivalDateFallback =
+      remainingItems[0]?.arrivalDateSql || arrivalDateSqlValue;
+
+    const transaction = new sql.Transaction(pool);
+    let newBatchId = null;
+    let deliveredRecords = [];
+    let remainingRecords = [];
+
+    try {
+      await transaction.begin();
+
+      await new sql.Request(transaction)
+        .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
+        .query(`DELETE FROM dbo.ImportRequests WHERE BatchId = @BatchId;`);
+
+      deliveredRecords = await insertImportRequestItems({
+        importer: deliveredItems[0]?.importer ?? importerFallback,
+        requestDateSqlValue: deliveredRequestDateFallback,
+        arrivalDateSqlValue: deliveredArrivalDateFallback,
+        normalizedItems: deliveredItems,
+        requesterUsername: req.user.username,
+        batchId: normalizedBatchId,
+        defaultComment: deliveredItems[0]?.comment ?? defaultCommentFallback,
+        transactionOverride: transaction,
+      });
+
+      if (remainingItems.length > 0) {
+        newBatchId = randomUUID();
+        remainingRecords = await insertImportRequestItems({
+          importer: remainingItems[0]?.importer ?? importerFallback,
+          requestDateSqlValue: remainingRequestDateFallback,
+          arrivalDateSqlValue: remainingArrivalDateFallback,
+          normalizedItems: remainingItems,
+          requesterUsername: req.user.username,
+          batchId: newBatchId,
+          defaultComment:
+            remainingItems[0]?.comment ??
+            splitCommentFallback ??
+            defaultCommentFallback,
+          transactionOverride: transaction,
+        });
+      }
+
+      await transaction.commit();
+    } catch (splitError) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error("Split rollback error:", rollbackError.message);
+      }
+      throw splitError;
+    }
+
+    const actualArrivalDateSql =
+      documentArrivalDateSql ||
+      deliveredRecords[0]?.ActualArrivalDate ||
+      deliveredArrivalDateFallback ||
+      originalArrivalDateSql ||
+      todaySql;
+
+    await pool
+      .request()
+      .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
+      .input("ActualArrivalDate", sql.Date, actualArrivalDateSql)
+      .input("ConfirmedBy", sql.NVarChar(128), req.user.username)
+      .query(`UPDATE dbo.ImportRequests
+              SET Status = 'approved',
+                  ConfirmedBy = COALESCE(ConfirmedBy, @ConfirmedBy),
+                  ActualArrivalDate = @ActualArrivalDate
+              WHERE BatchId = @BatchId`);
+
+    if (newBatchId) {
+      await pool
+        .request()
+        .input("BatchId", sql.UniqueIdentifier, newBatchId)
+        .input("ArrivalDate", sql.Date, arrivalDateSqlValue)
+        .query(`UPDATE dbo.ImportRequests
+                SET Status = 'pending',
+                    ConfirmedBy = NULL,
+                    ActualArrivalDate = NULL,
+                    DataArritjes = @ArrivalDate
+                WHERE BatchId = @BatchId`);
+    }
+
+    const basePayload = {
+      summary,
+      lines,
+      unmatchedDocumentArticles,
+      generatedAt: new Date().toISOString(),
+    };
+
+    const deliveredPayload = {
+      ...basePayload,
+      split: {
+        role: "delivered",
+        relatedBatchId: newBatchId || null,
+      },
+    };
+
+    await storeBatchDocumentSnapshot({
+      pool,
+      batchId: normalizedBatchId,
+      documentNumber: brojDokValue,
+      payload: deliveredPayload,
+      arrivalDate: documentArrivalDateSql || arrivalDateSqlValue,
+      username: req.user.username,
+    });
+
+    let remainingPayload = null;
+
+    if (newBatchId) {
+      remainingPayload = {
+        ...basePayload,
+        split: {
+          role: "remaining",
+          relatedBatchId: normalizedBatchId,
+        },
+      };
+
+      await storeBatchDocumentSnapshot({
+        pool,
+        batchId: newBatchId,
+        documentNumber: brojDokValue,
+        payload: remainingPayload,
+        arrivalDate: arrivalDateSqlValue,
+        username: req.user.username,
+      });
+    }
+
+    await recordRequestLog({
+      pool,
+      batchId: normalizedBatchId,
+      username: req.user.username,
+      action: "split_document_applied",
+      details: `Aplikuar dokumenti ${brojDokValue}. Batch i ri: ${
+        newBatchId || "N/A"
+      }.`,
+      snapshot: JSON.stringify(deliveredPayload),
+    });
+
+    if (newBatchId) {
+      await recordRequestLog({
+        pool,
+        batchId: newBatchId,
+        username: req.user.username,
+        action: "split_document_created",
+        details: `Krijuar nga ndarja e batch ${normalizedBatchId} me dokument ${brojDokValue}.`,
+        snapshot: JSON.stringify(remainingPayload || basePayload),
+      });
+    }
+
+    if (newBatchId && remainingRecords.length > 0) {
+      await notifyRequestCreation({
+        pool,
+        records: remainingRecords,
+        initiatorUsername: req.user.username,
+      });
+    }
+
+    res.json({
+      batchId: normalizedBatchId,
+      newBatchId,
+      document: {
+        sifraOe: Number(sifraOe) || null,
+        sifraDok: Number(sifraDok) || null,
+        brojDok: brojDokValue,
+        arrivalDate: arrivalDateSqlValue,
+        sifraPrim: sifraPrim || null,
+        imaDodatna: imaDodatna || null,
+        podrediOpc: podrediOpc || null,
+      },
+      lines,
+      summary,
+      unmatchedDocumentArticles,
+      requestsReset: true,
+      arrivalDate: arrivalDateSqlValue,
+    });
+  } catch (error) {
+    console.error("Separate bill lookup error:", error);
+    res.status(500).json({
+      message:
+        "Nuk mundëm të marrim artikujt e dokumentit. Ju lutemi provoni përsëri.",
+    });
+  }
+});
 
 export default router;
