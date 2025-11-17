@@ -1,7 +1,33 @@
 import axios from "axios";
 
+const resolveBaseURL = () => {
+  let envUrl = null;
+  if (
+    typeof import.meta !== "undefined" &&
+    import.meta.env &&
+    typeof import.meta.env.VITE_API_URL === "string"
+  ) {
+    envUrl = import.meta.env.VITE_API_URL.trim();
+  }
+  if (envUrl) {
+    return envUrl;
+  }
+
+  if (typeof window === "undefined") {
+    return "http://192.168.100.35:5000/api";
+  }
+
+  const hostname = window.location.hostname || "localhost";
+  const protocol = window.location.protocol || "http:";
+  const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
+  const targetHost = isLocal ? "localhost" : hostname;
+  const port = "5000";
+
+  return `${protocol}//${targetHost}:${port}/api`;
+};
+
 const API = axios.create({
-  baseURL: "http://192.168.100.35:5000/api",
+  baseURL: resolveBaseURL(),
 });
 
 API.interceptors.request.use((config) => {

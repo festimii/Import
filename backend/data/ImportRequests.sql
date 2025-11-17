@@ -10,6 +10,7 @@ CREATE TABLE [dbo].[ImportRequests](
     [DataKerkeses] DATETIME NOT NULL DEFAULT (GETDATE()), -- request date
     [DataArritjes] DATETIME NULL,                          -- planned arrival date
     [ActualArrivalDate] DATETIME NULL,                     -- actual arrival date (set by confirmer)
+    [LastApprovedArrivalDate] DATETIME NULL,               -- last confirmed planned arrival
     [Importuesi] NVARCHAR(100) NOT NULL,                  -- importer name
     [Artikulli] NVARCHAR(255) NOT NULL,                   -- article name or code
     [ArticleName] NVARCHAR(255) NULL,                     -- descriptive article label (ImeArt)

@@ -804,6 +804,12 @@ const mapArticles = (records, batchDocuments = null) =>
     mapped.ArrivalDate =
       mapped.ActualArrivalDate ?? plannedArrival ?? rawArrival ?? null;
 
+    if (mapped.LastApprovedArrivalDate) {
+      mapped.LastApprovedArrivalDate = toSqlDateString(
+        mapped.LastApprovedArrivalDate
+      );
+    }
+
     if (batchDocuments && record.BatchId) {
       const docKey = String(record.BatchId).toLowerCase();
       if (batchDocuments.has(docKey)) {
@@ -1236,6 +1242,7 @@ const ensureImportRequestEnhancements = () => {
       const batchConstraint = "DF_ImportRequests_BatchId";
       const articleNameColumn = "ArticleName";
       const actualArrivalColumn = "ActualArrivalDate";
+      const lastApprovedArrivalColumn = "LastApprovedArrivalDate";
 
       const ensureBatchColumn = async () => {
         const hasBatchColumn = await columnExists(
@@ -1298,6 +1305,21 @@ const ensureImportRequestEnhancements = () => {
             .request()
             .query(
               `ALTER TABLE ${importTable} ADD ${actualArrivalColumn} DATETIME NULL;`
+            );
+        }
+      };
+
+      const ensureLastApprovedArrivalColumn = async () => {
+        const hasColumn = await columnExists(
+          pool,
+          importTable,
+          lastApprovedArrivalColumn
+        );
+        if (!hasColumn) {
+          await pool
+            .request()
+            .query(
+              `ALTER TABLE ${importTable} ADD ${lastApprovedArrivalColumn} DATETIME NULL;`
             );
         }
       };
@@ -1462,6 +1484,7 @@ const ensureImportRequestEnhancements = () => {
       await ensureBatchColumn();
       await ensureArticleNameColumn();
       await ensureActualArrivalColumn();
+      await ensureLastApprovedArrivalColumn();
       await ensureDetailsTable();
       await ensureRequestLogTable();
       await ensureBatchDocumentTable();
@@ -3142,6 +3165,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       .query(
         `SELECT DataArritjes AS CurrentArrivalDate,
                 ActualArrivalDate AS CurrentActualArrivalDate,
+                LastApprovedArrivalDate AS LastApprovedArrivalDate,
                 Useri AS Requester,
                 Status AS CurrentStatus
          FROM ImportRequests
@@ -3155,6 +3179,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     const {
       CurrentArrivalDate,
       CurrentActualArrivalDate,
+      LastApprovedArrivalDate: previousApprovedArrivalDate,
       Requester: requesterUsername,
       CurrentStatus,
     } = existingResult.recordset[0];
@@ -3216,6 +3241,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                    INSERTED.DataKerkeses AS RequestDate,
                    INSERTED.DataArritjes AS PlannedArrivalDate,
                    INSERTED.ActualArrivalDate,
+                   INSERTED.LastApprovedArrivalDate,
                    INSERTED.Importuesi AS Importer,
                    INSERTED.Artikulli AS Article,
                    INSERTED.ArticleName AS ArticleName,
@@ -3244,6 +3270,41 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                    INSERTED.CreatedAt${batchOutput}
             WHERE ID = @ID`);
     const [record] = mapArticles(result.recordset);
+    const normalizedStatus = status
+      ? String(status).toLowerCase()
+      : null;
+    const revertToLastApprovedSql =
+      normalizedStatus === "rejected"
+        ? toSqlDateString(previousApprovedArrivalDate)
+        : null;
+
+    if (normalizedStatus === "approved") {
+      const approvedDateSql =
+        toSqlDateString(record.PlannedArrivalDate) ||
+        arrivalDateSqlValue ||
+        toSqlDateString(CurrentArrivalDate);
+
+      await pool
+        .request()
+        .input("ID", record.ID)
+        .input("LastApprovedArrivalDate", approvedDateSql)
+        .query(`UPDATE ImportRequests
+                SET LastApprovedArrivalDate = @LastApprovedArrivalDate
+                WHERE ID = @ID;`);
+
+      record.LastApprovedArrivalDate = approvedDateSql;
+    } else if (revertToLastApprovedSql) {
+      await pool
+        .request()
+        .input("ID", record.ID)
+        .input("ArrivalDate", revertToLastApprovedSql)
+        .query(`UPDATE ImportRequests
+                SET DataArritjes = @ArrivalDate
+                WHERE ID = @ID;`);
+
+      record.PlannedArrivalDate = revertToLastApprovedSql;
+      record.ArrivalDate = revertToLastApprovedSql;
+    }
 
     const notificationsToDispatch = [];
     const defaultNotificationRoles = ["admin", "confirmer"];
@@ -3314,7 +3375,6 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     }
 
     if (status) {
-      const normalizedStatus = String(status).toLowerCase();
       const previousStatus = (CurrentStatus || "").toLowerCase();
 
       if (normalizedStatus !== previousStatus) {
@@ -3334,6 +3394,24 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
           pushBody: copy.pushBody,
         });
       }
+    }
+
+    if (revertToLastApprovedSql) {
+      const revertLabel = formatNotificationDate(
+        revertToLastApprovedSql
+      );
+      const revertMessage = revertLabel
+        ? `Ndryshimi i datës u refuzua. Data u kthye në ${revertLabel}.`
+        : "Ndryshimi i datës u refuzua dhe u rikthye në datën e fundit të miratuar.";
+
+      notificationsToDispatch.push({
+        message: revertMessage,
+        type: "arrival_reverted",
+        roles: defaultNotificationRoles,
+        usernames: requesterAudience,
+        pushTitle: "Data u rikthye",
+        pushBody: revertMessage,
+      });
     }
 
     for (const notification of notificationsToDispatch) {
@@ -4031,7 +4109,8 @@ router.post(
       .query(`UPDATE dbo.ImportRequests
               SET Status = 'approved',
                   ConfirmedBy = COALESCE(ConfirmedBy, @ConfirmedBy),
-                  ActualArrivalDate = @ActualArrivalDate
+                  ActualArrivalDate = @ActualArrivalDate,
+                  LastApprovedArrivalDate = DataArritjes
               WHERE BatchId = @BatchId`);
 
     if (newBatchId) {
