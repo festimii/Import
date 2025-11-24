@@ -394,7 +394,7 @@ const aggregateImportItemsByArticle = (items = []) => {
 const describeActionDetails = (action, metadata = {}) => {
   switch (action) {
     case "created":
-      return "Kërkesë e re - në pritje të konfirmimit";
+      return "Porosi e re importi - në pritje të konfirmimit nga depo";
     case "arrival_change": {
       const previous = metadata.previousDate
         ? formatNotificationDate(metadata.previousDate)
@@ -404,15 +404,15 @@ const describeActionDetails = (action, metadata = {}) => {
         : null;
 
       if (previous && next && previous !== next) {
-        return `Data e planifikuar: ${previous} -> ${next}`;
+        return `Data e planifikuar e mbërritjes: ${previous} -> ${next}`;
       }
       if (next) {
-        return `Data e planifikuar: ${next}`;
+        return `Data e planifikuar e mbërritjes: ${next}`;
       }
       if (previous) {
-        return `Data e planifikuar: ${previous}`;
+        return `Data e planifikuar e mbërritjes: ${previous}`;
       }
-      return "Data e planifikuar u përditësua";
+      return "Data e planifikuar e mbërritjes u përditësua";
     }
     case "actual_arrival": {
       const previous = metadata.previousDate
@@ -423,22 +423,22 @@ const describeActionDetails = (action, metadata = {}) => {
         : null;
 
       if (previous && next && previous !== next) {
-        return `Mbërritja reale: ${previous} -> ${next}`;
+        return `Mbërritja faktike në depo: ${previous} -> ${next}`;
       }
       if (next) {
-        return `Mbërritja reale: ${next}`;
+        return `Mbërritja faktike në depo: ${next}`;
       }
       if (previous) {
-        return `Mbërritja reale: ${previous}`;
+        return `Mbërritja faktike në depo: ${previous}`;
       }
-      return "Mbërritja reale u përditësua";
+      return "Mbërritja faktike në depo u përditësua";
     }
     case "status":
       return describeStatusInAlbanian(metadata.status);
     case "edited":
-      return "Detajet u përditësuan dhe kërkohet konfirmim i ri";
+      return "Detajet e porosisë u përditësuan, kërkohet konfirmim i ri";
     case "deleted":
-      return "Kërkesa u anulua nga kërkuesi";
+      return "Porosia u anulua nga kërkuesi";
     default:
       return null;
   }
@@ -2486,7 +2486,7 @@ router.get(
   }
 );
 // ---------- GET PENDING REQUESTS (Confirmer) ----------
-router.get("/", verifyRole(["confirmer"]), async (req, res) => {
+router.get("/", verifyRole(["confirmer", "requester", "admin"]), async (req, res) => {
   try {
     const { hasBatchId } = await getImportRequestFeatureState();
     const batchProjection = hasBatchId
@@ -3039,7 +3039,6 @@ router.patch(
       const existingResult = await pool
         .request()
         .input("ID", req.params.id)
-        .input("Requester", req.user.username)
         .query(
           `SELECT ID,
                   Importuesi AS Importer,
@@ -3049,8 +3048,7 @@ router.patch(
                   DataArritjes AS CurrentArrivalDate,
                   ActualArrivalDate AS CurrentActualArrivalDate
            FROM ImportRequests
-           WHERE ID = @ID
-             AND Useri = @Requester`
+           WHERE ID = @ID`
         );
 
       if (existingResult.recordset.length === 0) {
@@ -3069,7 +3067,6 @@ router.patch(
       const updateResult = await pool
         .request()
         .input("ID", req.params.id)
-        .input("Requester", req.user.username)
         .input("ArrivalDate", arrivalDateSqlValue)
         .query(`UPDATE ImportRequests
                 SET DataArritjes = @ArrivalDate,
@@ -3105,8 +3102,7 @@ router.patch(
                        INSERTED.Status,
                        INSERTED.ConfirmedBy,
                        INSERTED.CreatedAt${batchOutput}
-                WHERE ID = @ID
-                  AND Useri = @Requester`);
+                WHERE ID = @ID`);
 
       if (updateResult.recordset.length === 0) {
         return res.status(404).json({ message: "Import request not found." });
@@ -3120,6 +3116,24 @@ router.patch(
       const updateMessage = previousDateLabel
         ? `Requester ${req.user.username} updated the planned arrival for request ${record.ID} from ${previousDateLabel} to ${newDateLabel}. Confirmation is required again.`
         : `Requester ${req.user.username} set the planned arrival for request ${record.ID} to ${newDateLabel}. Confirmation is required again.`;
+
+      const updatedBatchId =
+        hasBatchId && updateResult.recordset[0]
+          ? updateResult.recordset[0].BatchId || null
+          : null;
+
+      await recordRequestLog({
+        pool,
+        requestId: record.ID,
+        batchId: updatedBatchId,
+        username: req.user.username,
+        action: "requester_arrival_update",
+        details: `Planned arrival updated by ${req.user.username} from ${previousDateLabel} to ${newDateLabel}.`,
+        snapshot: JSON.stringify({
+          previousArrival: existing.CurrentArrivalDate,
+          nextArrival: arrivalDateSqlValue,
+        }),
+      });
 
       try {
         await dispatchNotificationEvent(pool, {
@@ -3467,7 +3481,7 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
   }
   const batchId = normalizedBatchId;
 
- const { importer, arrivalDate, requestDate, comment, items } = req.body || {};
+  const { importer, arrivalDate, requestDate, comment, items } = req.body || {};
   const importerValue = trimString(importer);
   if (!importerValue) {
     return res
@@ -3503,13 +3517,6 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
 
   if (existingResult.recordset.length === 0) {
     return res.status(404).json({ message: "Porosia nuk u gjet." });
-  }
-
-  const owner = trimString(existingResult.recordset[0].Requester)?.toLowerCase();
-  if (owner !== trimString(req.user.username)?.toLowerCase()) {
-    return res.status(403).json({
-      message: "Mund të modifikoni vetëm porositë që keni krijuar vetë.",
-    });
   }
 
   let requestDateSqlValue;
@@ -3555,7 +3562,7 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
       batchId,
       username: req.user.username,
       action: "updated",
-      details: `Përditësim i ${insertedRecords.length} artikujve nga kërkuesi.`,
+      details: `Përditësim i ${insertedRecords.length} artikujve nga kërkuesi ${req.user.username}.`,
       snapshot: JSON.stringify({
         importer: importerValue,
         requestDate: requestDateSqlValue,
@@ -3637,15 +3644,6 @@ router.delete(
       return res.status(404).json({ message: "Porosia nuk u gjet." });
     }
 
-    const owner = trimString(
-      existingRecordsResult.recordset[0].Requester
-    )?.toLowerCase();
-    if (owner !== trimString(req.user.username)?.toLowerCase()) {
-      return res.status(403).json({
-        message: "Mund të fshini vetëm porositë që keni krijuar vetë.",
-      });
-    }
-
     const transaction = new sql.Transaction(pool);
     try {
       await transaction.begin();
@@ -3659,7 +3657,7 @@ router.delete(
         batchId,
         username: req.user.username,
         action: "deleted",
-        details: `Fshirje e ${existingRecordsResult.recordset.length} artikujve para konfirmimit.`,
+        details: `Fshirje e ${existingRecordsResult.recordset.length} artikujve para konfirmimit nga ${req.user.username}.`,
         snapshot: JSON.stringify(existingRecordsResult.recordset),
       });
 

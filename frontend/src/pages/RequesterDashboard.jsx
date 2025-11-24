@@ -298,6 +298,103 @@ const formatBatchLabel = (value) => {
   return value.slice(0, 8).toUpperCase();
 };
 
+const groupRequestsByBatch = (requests = []) => {
+  if (!Array.isArray(requests) || requests.length === 0) {
+    return [];
+  }
+
+  const groups = new Map();
+
+  requests.forEach((request, index) => {
+    if (!request) return;
+    const key = request.BatchId ?? `legacy-${request.ID ?? index}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        batchId: request.BatchId ?? null,
+        importer: request.Importer ?? "Unknown importer",
+        items: [],
+        articleDetails: [],
+        statusCounts: {},
+        statuses: new Set(),
+        requestDate: null,
+        plannedArrivalDate: null,
+        actualArrivalDate: null,
+        hasActualArrival: false,
+        createdAt: request.CreatedAt ?? null,
+      });
+    }
+    const group = groups.get(key);
+    group.items.push(request);
+    group.articleDetails.push({
+      article: request.Article,
+      articleName: request.ArticleName,
+    });
+    group.requestDate = pickEarlierDateValue(
+      group.requestDate,
+      request.RequestDate
+    );
+    group.plannedArrivalDate = pickEarlierDateValue(
+      group.plannedArrivalDate,
+      request.PlannedArrivalDate ?? request.ArrivalDate ?? null
+    );
+    if (request.ActualArrivalDate) {
+      group.hasActualArrival = true;
+      group.actualArrivalDate = pickEarlierDateValue(
+        group.actualArrivalDate,
+        request.ActualArrivalDate
+      );
+    }
+    group.createdAt = pickEarlierDateValue(group.createdAt, request.CreatedAt);
+    if (request.Importer) {
+      group.importer = request.Importer;
+    }
+    const normalizedStatus = (request.Status || "pending").toLowerCase();
+    group.statusCounts[normalizedStatus] =
+      (group.statusCounts[normalizedStatus] || 0) + 1;
+    group.statuses.add(normalizedStatus);
+  });
+
+  return Array.from(groups.values())
+    .map((group) => {
+      const statuses = Array.from(group.statuses);
+      const isMixed = statuses.length > 1;
+      const primaryStatus = isMixed ? null : statuses[0];
+      const pending = statuses.some(isPendingStatus);
+      return {
+        ...group,
+        statuses,
+        statusLabel: isMixed
+          ? "Multiple statuses"
+          : formatStatusLabel(primaryStatus),
+        statusColor: getStatusChipColor(primaryStatus, isMixed),
+        varianceLabel: describeVarianceLabel(
+          group.plannedArrivalDate,
+          group.actualArrivalDate
+        ),
+        canEditArrival: !group.hasActualArrival,
+        isPending: pending,
+      };
+    })
+    .sort((a, b) => {
+      const aTime = (() => {
+        const source =
+          a.plannedArrivalDate || a.requestDate || a.createdAt || null;
+        if (!source) return 0;
+        const parsed = new Date(source);
+        return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+      })();
+      const bTime = (() => {
+        const source =
+          b.plannedArrivalDate || b.requestDate || b.createdAt || null;
+        if (!source) return 0;
+        const parsed = new Date(source);
+        return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+      })();
+      return bTime - aTime;
+    });
+};
+
 const PendingRequestsDialog = ({
   open,
   onClose,
@@ -305,6 +402,7 @@ const PendingRequestsDialog = ({
   loading,
   lastSyncedLabel,
   onRefresh,
+  feedback,
 }) => {
   const totalArticles = useMemo(
     () =>
@@ -436,6 +534,9 @@ const PendingRequestsDialog = ({
               Rifresko
             </Button>
           </Stack>
+          {feedback && (
+            <Alert severity={feedback.severity}>{feedback.message}</Alert>
+          )}
           {dialogBody}
         </Stack>
       </DialogContent>
@@ -460,9 +561,12 @@ export default function RequesterDashboard() {
   const [showAdvancedTotals, setShowAdvancedTotals] = useState(false);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
   const [submittedRequests, setSubmittedRequests] = useState([]);
-  const [submittedLoading, setSubmittedLoading] = useState(true);
   const [submittedFeedback, setSubmittedFeedback] = useState(null);
-  const [requestsLastLoadedAt, setRequestsLastLoadedAt] = useState(null);
+  const [sharedPendingRequests, setSharedPendingRequests] = useState([]);
+  const [sharedPendingLoading, setSharedPendingLoading] = useState(true);
+  const [sharedPendingFeedback, setSharedPendingFeedback] = useState(null);
+  const [sharedPendingLastLoadedAt, setSharedPendingLastLoadedAt] =
+    useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
   const [editArrivalDate, setEditArrivalDate] = useState("");
   const [editFeedback, setEditFeedback] = useState(null);
@@ -473,12 +577,10 @@ export default function RequesterDashboard() {
   const [deletingBatchId, setDeletingBatchId] = useState(null);
 
   const loadSubmittedRequests = useCallback(async () => {
-    setSubmittedLoading(true);
     try {
       const response = await API.get("/imports/mine");
       const records = Array.isArray(response.data) ? response.data : [];
       setSubmittedRequests(records);
-      setRequestsLastLoadedAt(new Date());
       setSubmittedFeedback((previous) =>
         previous?.severity === "error" ? null : previous
       );
@@ -489,14 +591,38 @@ export default function RequesterDashboard() {
           error?.response?.data?.message ??
           "We couldn't load your submitted imports. Please try again.",
       });
+    }
+  }, []);
+
+  const loadSharedPendingRequests = useCallback(async () => {
+    setSharedPendingLoading(true);
+    try {
+      const response = await API.get("/imports");
+      const records = Array.isArray(response.data) ? response.data : [];
+      setSharedPendingRequests(records);
+      setSharedPendingLastLoadedAt(new Date());
+      setSharedPendingFeedback(null);
+    } catch (error) {
+      setSharedPendingFeedback({
+        severity: "error",
+        message:
+          error?.response?.data?.message ??
+          "Nuk mund tA� marrim porositA� nA� pritje. Ju lutemi provoni pA�rsA�ri.",
+      });
     } finally {
-      setSubmittedLoading(false);
+      setSharedPendingLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadSubmittedRequests();
-  }, [loadSubmittedRequests]);
+    loadSharedPendingRequests();
+  }, [loadSubmittedRequests, loadSharedPendingRequests]);
+
+  const handleRefreshPending = useCallback(() => {
+    loadSharedPendingRequests();
+    loadSubmittedRequests();
+  }, [loadSharedPendingRequests, loadSubmittedRequests]);
 
   const handleItemChange = (index, field, value) => {
     setItems((previous) =>
@@ -994,104 +1120,10 @@ export default function RequesterDashboard() {
       ]
     : [];
 
-  const groupedSubmissions = useMemo(() => {
-    if (!Array.isArray(submittedRequests) || submittedRequests.length === 0) {
-      return [];
-    }
-    const groups = new Map();
-
-    submittedRequests.forEach((request, index) => {
-      if (!request) return;
-      const key = request.BatchId ?? `legacy-${request.ID ?? index}`;
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          batchId: request.BatchId ?? null,
-          importer: request.Importer ?? "Unknown importer",
-          items: [],
-          articleDetails: [],
-          statusCounts: {},
-          statuses: new Set(),
-          requestDate: null,
-          plannedArrivalDate: null,
-          actualArrivalDate: null,
-          hasActualArrival: false,
-          createdAt: request.CreatedAt ?? null,
-        });
-      }
-      const group = groups.get(key);
-      group.items.push(request);
-      group.articleDetails.push({
-        article: request.Article,
-        articleName: request.ArticleName,
-      });
-      group.requestDate = pickEarlierDateValue(
-        group.requestDate,
-        request.RequestDate
-      );
-      group.plannedArrivalDate = pickEarlierDateValue(
-        group.plannedArrivalDate,
-        request.PlannedArrivalDate ?? request.ArrivalDate ?? null
-      );
-      if (request.ActualArrivalDate) {
-        group.hasActualArrival = true;
-        group.actualArrivalDate = pickEarlierDateValue(
-          group.actualArrivalDate,
-          request.ActualArrivalDate
-        );
-      }
-      group.createdAt = pickEarlierDateValue(
-        group.createdAt,
-        request.CreatedAt
-      );
-      if (request.Importer) {
-        group.importer = request.Importer;
-      }
-      const normalizedStatus = (request.Status || "pending").toLowerCase();
-      group.statusCounts[normalizedStatus] =
-        (group.statusCounts[normalizedStatus] || 0) + 1;
-      group.statuses.add(normalizedStatus);
-    });
-
-    return Array.from(groups.values())
-      .map((group) => {
-        const statuses = Array.from(group.statuses);
-        const isMixed = statuses.length > 1;
-        const primaryStatus = isMixed ? null : statuses[0];
-        const pending = statuses.some(isPendingStatus);
-        return {
-          ...group,
-          statuses,
-          statusLabel: isMixed
-            ? "Multiple statuses"
-            : formatStatusLabel(primaryStatus),
-          statusColor: getStatusChipColor(primaryStatus, isMixed),
-          varianceLabel: describeVarianceLabel(
-            group.plannedArrivalDate,
-            group.actualArrivalDate
-          ),
-          canEditArrival: !group.hasActualArrival,
-          isPending: pending,
-        };
-      })
-      .sort((a, b) => {
-        const aTime = (() => {
-          const source =
-            a.plannedArrivalDate || a.requestDate || a.createdAt || null;
-          if (!source) return 0;
-          const parsed = new Date(source);
-          return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-        })();
-        const bTime = (() => {
-          const source =
-            b.plannedArrivalDate || b.requestDate || b.createdAt || null;
-          if (!source) return 0;
-          const parsed = new Date(source);
-          return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-        })();
-        return bTime - aTime;
-      });
-  }, [submittedRequests]);
+  const groupedSubmissions = useMemo(
+    () => groupRequestsByBatch(submittedRequests),
+    [submittedRequests]
+  );
 
   const findGroupByBatchId = (batchId) => {
     if (!batchId) return null;
@@ -1105,6 +1137,22 @@ export default function RequesterDashboard() {
         normalized.toLowerCase();
     });
   };
+
+  const sharedPendingGroups = useMemo(
+    () => groupRequestsByBatch(sharedPendingRequests),
+    [sharedPendingRequests]
+  );
+
+  const fallbackPendingGroups = useMemo(
+    () => groupedSubmissions.filter((group) => group.isPending),
+    [groupedSubmissions]
+  );
+
+  const pendingGroups = useMemo(
+    () =>
+      sharedPendingLastLoadedAt ? sharedPendingGroups : fallbackPendingGroups,
+    [sharedPendingLastLoadedAt, sharedPendingGroups, fallbackPendingGroups]
+  );
 
   const handleCalendarEditBatch = (batch) => {
     const match = findGroupByBatchId(batch?.BatchId);
@@ -1132,11 +1180,6 @@ export default function RequesterDashboard() {
     handleDeleteGroup(match);
   };
 
-  const pendingGroups = useMemo(
-    () => groupedSubmissions.filter((group) => group.isPending),
-    [groupedSubmissions]
-  );
-
   const pendingSummary = useMemo(
     () => ({
       totalGroups: pendingGroups.length,
@@ -1154,14 +1197,21 @@ export default function RequesterDashboard() {
       : "Pa porosi në pritje";
   const isEditingSubmission = Boolean(editingSubmission);
 
-  const requestsLastSyncedLabel = useMemo(() => {
-    if (!requestsLastLoadedAt) {
-      return submittedLoading
-        ? "Syncing your submissions..."
-        : "Not synced yet";
+  const pendingLastSyncedLabel = useMemo(() => {
+    if (sharedPendingLastLoadedAt) {
+      return `Updated ${sharedPendingLastLoadedAt.toLocaleString()}`;
     }
-    return `Updated ${requestsLastLoadedAt.toLocaleString()}`;
-  }, [requestsLastLoadedAt, submittedLoading]);
+    if (sharedPendingFeedback?.severity === "error") {
+      return sharedPendingFeedback.message;
+    }
+    return sharedPendingLoading
+      ? "Syncing pending requests..."
+      : "Not synced yet";
+  }, [
+    sharedPendingFeedback,
+    sharedPendingLastLoadedAt,
+    sharedPendingLoading,
+  ]);
 
   const formatQuantity = (value, fractionDigits = 0) => {
     if (value === null || value === undefined) {
@@ -1236,6 +1286,18 @@ export default function RequesterDashboard() {
               {submittedFeedback.message}
             </Alert>
           )}
+          <CalendarOverview
+            title="Calendari i Arritjeve te Konfirmuara"
+            description=" "
+            allowRequesterReschedule
+            requesterUsername={requesterUsername}
+            onRequesterReschedule={loadSubmittedRequests}
+            onRequesterEditBatch={handleCalendarEditBatch}
+            onRequesterDeleteBatch={handleCalendarDeleteBatch}
+            requesterEditBatchId={editingSubmission?.batchId ?? null}
+            requesterDeleteBatchId={deletingBatchId}
+            allowSplitBill
+          />
           <SectionCard
             title="Krijo porosi te re"
             description="Vendos detajet e porosise se importit per te filluar procesin e palletizimit dhe planifikimit te ardhjes."
@@ -1517,19 +1579,6 @@ export default function RequesterDashboard() {
             </Stack>
           </SectionCard>
 
-          <CalendarOverview
-            title="Calendari i Arritjeve te Konfirmuara"
-            description=" "
-            allowRequesterReschedule
-            requesterUsername={requesterUsername}
-            onRequesterReschedule={loadSubmittedRequests}
-            onRequesterEditBatch={handleCalendarEditBatch}
-            onRequesterDeleteBatch={handleCalendarDeleteBatch}
-            requesterEditBatchId={editingSubmission?.batchId ?? null}
-            requesterDeleteBatchId={deletingBatchId}
-            allowSplitBill
-          />
-
           {latestItems.length > 0 && (
             <SectionCard
               title="Latest palletization summary"
@@ -1702,9 +1751,10 @@ export default function RequesterDashboard() {
         open={pendingDialogOpen}
         onClose={() => setPendingDialogOpen(false)}
         groups={pendingGroups}
-        loading={submittedLoading}
-        lastSyncedLabel={requestsLastSyncedLabel}
-        onRefresh={loadSubmittedRequests}
+        loading={sharedPendingLoading}
+        lastSyncedLabel={pendingLastSyncedLabel}
+        onRefresh={handleRefreshPending}
+        feedback={sharedPendingFeedback}
       />
       <Dialog
         open={Boolean(editingGroup)}

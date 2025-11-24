@@ -415,6 +415,12 @@ export default function ConfirmerDashboard() {
             </Grid>
           )}
 
+          <CalendarOverview
+            title="Calendar overview"
+            description=""
+            allowArrivalUpdates
+          />
+
           <SectionCard
             title="Pending confirmations"
             description="Review grouped submissions and approve, reject, or propose new arrival dates."
@@ -493,12 +499,6 @@ export default function ConfirmerDashboard() {
               )}
             </Stack>
           </SectionCard>
-
-          <CalendarOverview
-            title="Calendar overview"
-            description=""
-            allowArrivalUpdates
-          />
         </Stack>
       </Container>
 

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { alpha, useTheme } from "@mui/material/styles";
 import {
   Box,
@@ -6,6 +7,7 @@ import {
   CardActions,
   CardContent,
   Chip,
+  Collapse,
   Divider,
   Grid,
   Stack,
@@ -80,6 +82,7 @@ export default function RequestGroupCard({
   onProposeDate,
 }) {
   const theme = useTheme();
+  const [showDetails, setShowDetails] = useState(false);
 
   const sharedArrivalDate = group.sharedArrivalDate
     ? formatDate(group.sharedArrivalDate)
@@ -244,12 +247,29 @@ export default function RequestGroupCard({
             </Stack>
 
             <Stack spacing={1.5}>
-              <Typography variant="subtitle2" color="text.secondary">
-                Articles in this bill
-              </Typography>
-              <Stack spacing={1.5}>
-                {group.items.map((item) => (
-                  <Box
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                alignItems={{ xs: "flex-start", sm: "center" }}
+                justifyContent="space-between"
+                spacing={1}
+              >
+                <Typography variant="subtitle2" color="text.secondary">
+                  Articles in this bill
+                </Typography>
+                <Button
+                  type="button"
+                  size="small"
+                  onClick={() => setShowDetails((prev) => !prev)}
+                >
+                  {showDetails
+                    ? "Hide articles"
+                    : `Show articles (${group.items.length})`}
+                </Button>
+              </Stack>
+              <Collapse in={showDetails} unmountOnExit>
+                <Stack spacing={1.5}>
+                  {group.items.map((item) => (
+                    <Box
                     key={item.ID}
                     sx={{
                       p: 2.5,
@@ -344,26 +364,27 @@ export default function RequestGroupCard({
                       </Grid>
                     </Stack>
                   </Box>
-                ))}
-              </Stack>
-            </Stack>
+                  ))}
+                </Stack>
 
-            {group.comments.length > 0 && (
-              <Stack spacing={0.5}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Requester notes
-                </Typography>
-                {group.comments.map((comment, index) => (
-                  <Typography
-                    key={`${comment}-${index}`}
-                    variant="body2"
-                    sx={{ whiteSpace: "pre-wrap" }}
-                  >
-                    {comment}
-                  </Typography>
-                ))}
-              </Stack>
-            )}
+                {group.comments.length > 0 && (
+                  <Stack spacing={0.5} sx={{ mt: 2 }}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Requester notes
+                    </Typography>
+                    {group.comments.map((comment, index) => (
+                      <Typography
+                        key={`${comment}-${index}`}
+                        variant="body2"
+                        sx={{ whiteSpace: "pre-wrap" }}
+                      >
+                        {comment}
+                      </Typography>
+                    ))}
+                  </Stack>
+                )}
+              </Collapse>
+            </Stack>
           </Stack>
         </Stack>
       </CardContent>

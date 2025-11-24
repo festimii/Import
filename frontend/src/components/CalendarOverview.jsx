@@ -1159,16 +1159,9 @@ const CalendarOverview = ({
                 const canRequesterReschedule =
                   allowRequesterReschedule &&
                   !batch.ActualArrivalDate &&
-                  requesterUsername &&
-                  Array.isArray(batch.RequesterList) &&
-                  batch.RequesterList.includes(requesterUsername) &&
                   (requestIdTargets.length > 0 || Boolean(batch.ID));
                 const canRequesterManageBatch =
-                  allowRequesterReschedule &&
-                  requesterUsername &&
-                  Boolean(batch.BatchId) &&
-                  Array.isArray(batch.RequesterList) &&
-                  batch.RequesterList.includes(requesterUsername);
+                  allowRequesterReschedule && Boolean(batch.BatchId);
                 const requesterEditInFlight =
                   normalizeBatchId(requesterEditBatchId) &&
                   batch.BatchId &&
