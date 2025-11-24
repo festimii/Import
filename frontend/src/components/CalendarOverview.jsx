@@ -1156,12 +1156,32 @@ const CalendarOverview = ({
                 const canEditArrival =
                   allowArrivalUpdates &&
                   (requestIdTargets.length > 0 || Boolean(batch.ID));
+                const arrivalLockDate =
+                  batch.ActualArrivalDate ||
+                  batch.ArrivalDate ||
+                  batch.PlannedArrivalDate ||
+                  null;
+                const isPastArrival = (() => {
+                  if (!arrivalLockDate) return false;
+                  const parsed = new Date(arrivalLockDate);
+                  if (Number.isNaN(parsed.getTime())) return false;
+                  const today = new Date();
+                  parsed.setHours(0, 0, 0, 0);
+                  today.setHours(0, 0, 0, 0);
+                  return parsed.getTime() < today.getTime();
+                })();
+                const isLockedForRequester =
+                  Boolean(batch.ActualArrivalDate) || isPastArrival;
                 const canRequesterReschedule =
                   allowRequesterReschedule &&
                   !batch.ActualArrivalDate &&
+                  !isLockedForRequester &&
                   (requestIdTargets.length > 0 || Boolean(batch.ID));
                 const canRequesterManageBatch =
-                  allowRequesterReschedule && Boolean(batch.BatchId);
+                  allowRequesterReschedule &&
+                  Boolean(batch.BatchId) &&
+                  !isLockedForRequester;
+                const canSplitBill = allowSplitBill && Boolean(batch.BatchId);
                 const requesterEditInFlight =
                   normalizeBatchId(requesterEditBatchId) &&
                   batch.BatchId &&
@@ -1462,8 +1482,8 @@ const CalendarOverview = ({
                         canRequesterReschedule ||
                         (canRequesterManageBatch &&
                           (onRequesterEditBatch ||
-                            onRequesterDeleteBatch ||
-                            allowSplitBill))) && (
+                            onRequesterDeleteBatch)) ||
+                        canSplitBill) && (
                         <Stack
                           direction={{ xs: "column", sm: "row" }}
                           spacing={1}
@@ -1528,18 +1548,16 @@ const CalendarOverview = ({
                                   : "Delete"}
                               </Button>
                             )}
-                          {canRequesterManageBatch &&
-                            allowSplitBill &&
-                            batch.BatchId && (
-                              <Button
-                                type="button"
-                                size="small"
-                                variant="outlined"
-                                onClick={() => handleOpenSplitDialog(batch)}
-                              >
-                                Split bill
-                              </Button>
-                            )}
+                          {canSplitBill && (
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="outlined"
+                              onClick={() => handleOpenSplitDialog(batch)}
+                            >
+                              Split bill
+                            </Button>
+                          )}
                         </Stack>
                       )}
                     </Stack>

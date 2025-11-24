@@ -4237,6 +4237,7 @@ router.post(
       split: {
         role: "delivered",
         relatedBatchId: newBatchId || null,
+        documentNumber: brojDokValue,
       },
     };
 
@@ -4257,6 +4258,7 @@ router.post(
         split: {
           role: "remaining",
           relatedBatchId: normalizedBatchId,
+          documentNumber: brojDokValue,
         },
       };
 
@@ -4270,27 +4272,27 @@ router.post(
       });
     }
 
-    await recordRequestLog({
-      pool,
-      batchId: normalizedBatchId,
-      username: req.user.username,
-      action: "split_document_applied",
-      details: `Aplikuar dokumenti ${brojDokValue}. Batch i ri: ${
-        newBatchId || "N/A"
-      }.`,
-      snapshot: JSON.stringify(deliveredPayload),
-    });
-
-    if (newBatchId) {
       await recordRequestLog({
         pool,
-        batchId: newBatchId,
+        batchId: normalizedBatchId,
         username: req.user.username,
-        action: "split_document_created",
-        details: `Krijuar nga ndarja e batch ${normalizedBatchId} me dokument ${brojDokValue}.`,
-        snapshot: JSON.stringify(remainingPayload || basePayload),
+        action: "split_document_applied",
+        details: `Aplikuar dokumenti ${brojDokValue}. Batch i ri: ${
+          newBatchId || "N/A"
+        }.`,
+        snapshot: JSON.stringify(deliveredPayload),
       });
-    }
+
+      if (newBatchId) {
+        await recordRequestLog({
+          pool,
+          batchId: newBatchId,
+          username: req.user.username,
+          action: "split_document_created",
+          details: `Krijuar nga ndarja e batch ${normalizedBatchId} me dokument ${brojDokValue}.`,
+          snapshot: JSON.stringify(remainingPayload || basePayload),
+        });
+      }
 
     if (newBatchId && remainingRecords.length > 0) {
       await notifyRequestCreation({
