@@ -9,6 +9,7 @@ import Register from "./pages/Register";
 import RequesterDashboard from "./pages/RequesterDashboard";
 import ConfirmerDashboard from "./pages/ConfirmerDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import RequesterHistory from "./pages/RequesterHistory";
 
 export default function App() {
   const token = localStorage.getItem("token");
@@ -25,7 +26,10 @@ export default function App() {
         )}
 
         {token && role === "requester" && (
-          <Route path="/" element={<RequesterDashboard />} />
+          <>
+            <Route path="/" element={<RequesterDashboard />} />
+            <Route path="/history" element={<RequesterHistory />} />
+          </>
         )}
         {token && role === "confirmer" && (
           <Route path="/" element={<ConfirmerDashboard />} />

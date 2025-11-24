@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -550,6 +551,7 @@ const PendingRequestsDialog = ({
 export default function RequesterDashboard() {
   const currentDate = today();
   const requesterUsername = useMemo(() => decodeUsernameFromToken(), []);
+  const navigate = useNavigate();
   const [importer, setImporter] = useState("");
   const [items, setItems] = useState([{ article: "", boxCount: "" }]);
   const [arrivalDate, setArrivalDate] = useState("");
@@ -1258,6 +1260,13 @@ export default function RequesterDashboard() {
         title="Stock Menagment"
         subtitle=""
         actions={[
+          <Button
+            key="history"
+            variant="outlined"
+            onClick={() => navigate("/history")}
+          >
+            History
+          </Button>,
           <Button
             key="pending"
             variant="outlined"

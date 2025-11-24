@@ -80,6 +80,7 @@ export default function RequestGroupCard({
   onApprove,
   onReject,
   onProposeDate,
+  onViewHistory,
 }) {
   const theme = useTheme();
   const [showDetails, setShowDetails] = useState(false);
@@ -88,7 +89,22 @@ export default function RequestGroupCard({
     ? formatDate(group.sharedArrivalDate)
     : group.arrivalDateConflict
     ? "Multiple dates"
-    : "—";
+    : "N/A";
+
+  const slaLabel = (() => {
+    const target = group.sharedArrivalDate || group.requestDate || null;
+    if (!target) return null;
+    const parsed = new Date(target);
+    if (Number.isNaN(parsed.getTime())) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round(
+      (parsed.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    if (diffDays === 0) return "Arrives today";
+    if (diffDays < 0) return `${Math.abs(diffDays)} day(s) overdue`;
+    return `${diffDays} day(s) to arrival`;
+  })();
 
   return (
     <Card
@@ -164,6 +180,20 @@ export default function RequestGroupCard({
                     <Chip
                       label="Multiple dates"
                       color="warning"
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                  {slaLabel && (
+                    <Chip
+                      label={slaLabel}
+                      color={
+                        slaLabel.includes("overdue")
+                          ? "error"
+                          : slaLabel.includes("today")
+                          ? "warning"
+                          : "success"
+                      }
                       size="small"
                       variant="outlined"
                     />
@@ -408,6 +438,15 @@ export default function RequestGroupCard({
             onClick={() => onProposeDate(group)}
           >
             Propose new date
+          </Button>
+        )}
+        {onViewHistory && group.batchId && (
+          <Button
+            variant="text"
+            color="primary"
+            onClick={() => onViewHistory(group)}
+          >
+            View history
           </Button>
         )}
         <Box sx={{ display: "flex", gap: 1 }}>

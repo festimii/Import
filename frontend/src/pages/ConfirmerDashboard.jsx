@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogTitle,
   Grid,
+  MenuItem,
   Paper,
   Stack,
   TextField,
@@ -19,6 +20,8 @@ import {
 import { alpha } from "@mui/material/styles";
 import AssignmentTurnedInRoundedIcon from "@mui/icons-material/AssignmentTurnedInRounded";
 import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
+import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
+import HistoryEduRoundedIcon from "@mui/icons-material/HistoryEduRounded";
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import ViewInArRoundedIcon from "@mui/icons-material/ViewInArRounded";
@@ -54,6 +57,15 @@ export default function ConfirmerDashboard() {
   const [proposalSubmitting, setProposalSubmitting] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const [filterImporter, setFilterImporter] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLogs, setHistoryLogs] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
+  const [historyBatchId, setHistoryBatchId] = useState(null);
 
   const loadRequests = async () => {
     setLoading(true);
@@ -102,6 +114,7 @@ export default function ConfirmerDashboard() {
           importer: request.Importer,
           requester: request.Requester,
           requestDate: request.RequestDate,
+          batchId: request.BatchId || null,
           items: [],
           totalBoxes: 0,
           totalPallets: 0,
@@ -121,6 +134,9 @@ export default function ConfirmerDashboard() {
 
       const group = map.get(key);
       group.items.push(request);
+      if (request.BatchId && !group.batchId) {
+        group.batchId = request.BatchId;
+      }
 
       const boxes = Number(request.BoxCount);
       if (Number.isFinite(boxes)) {
@@ -228,6 +244,33 @@ export default function ConfirmerDashboard() {
     };
   }, [groupedRequests, requests]);
 
+  const filteredGroups = useMemo(() => {
+    const importerQuery = filterImporter.trim().toLowerCase();
+    const fromTs = filterFrom ? new Date(filterFrom).getTime() : null;
+    const toTs = filterTo ? new Date(filterTo).getTime() : null;
+    return groupedRequests.filter((group) => {
+      const matchesImporter = importerQuery
+        ? (group.importer || "").toLowerCase().includes(importerQuery) ||
+          (group.requester || "").toLowerCase().includes(importerQuery)
+        : true;
+      const groupDate = group.requestDate
+        ? new Date(group.requestDate).getTime()
+        : null;
+      const matchesFrom = fromTs ? (groupDate || 0) >= fromTs : true;
+      const matchesTo = toTs ? (groupDate || 0) <= toTs : true;
+      const statuses = new Set(
+        group.items
+          .map((item) => String(item.Status || "pending").toLowerCase())
+          .filter(Boolean)
+      );
+      const matchesStatus =
+        filterStatus === "all"
+          ? true
+          : statuses.has(filterStatus.toLowerCase());
+      return matchesImporter && matchesFrom && matchesTo && matchesStatus;
+    });
+  }, [filterFrom, filterImporter, filterStatus, filterTo, groupedRequests]);
+
   const lastSyncLabel = useMemo(() => {
     if (!lastSyncedAt) {
       return "Not synced yet";
@@ -281,6 +324,77 @@ export default function ConfirmerDashboard() {
     setProposingGroup(null);
     setProposalDate("");
     setProposalFeedback(null);
+  };
+
+  const handleExportCsv = () => {
+    if (filteredGroups.length === 0) return;
+    const rows = [
+      [
+        "Importer",
+        "Requester",
+        "Request Date",
+        "Articles",
+        "Boxes",
+        "Pallets",
+        "Statuses",
+        "BatchId",
+      ],
+    ];
+    filteredGroups.forEach((group) => {
+      const statuses = new Set(
+        group.items.map((item) => String(item.Status || "pending"))
+      );
+      rows.push([
+        group.importer || "",
+        group.requester || "",
+        group.requestDate || "",
+        group.items.length || 0,
+        group.totalBoxes || 0,
+        group.totalPallets || 0,
+        Array.from(statuses).join(" | "),
+        group.batchId || "",
+      ]);
+    });
+    const csv = rows
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "pending-confirmations.csv";
+    link.click();
+  };
+
+  const handleOpenHistory = async (group) => {
+    if (!group?.batchId) return;
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    setHistoryError(null);
+    setHistoryLogs([]);
+    setHistoryBatchId(group.batchId);
+    try {
+      const response = await API.get(`/imports/batch/${group.batchId}/logs`);
+      setHistoryLogs(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      setHistoryError(
+        error?.response?.data?.message ||
+          "Nuk mund të ngarkojmë historikun për këtë porosi. Ju lutemi provoni përsëri."
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleCloseHistory = () => {
+    if (historyLoading) return;
+    setHistoryOpen(false);
+    setHistoryLogs([]);
+    setHistoryBatchId(null);
+    setHistoryError(null);
   };
 
   const handleSubmitProposal = async () => {
@@ -424,32 +538,89 @@ export default function ConfirmerDashboard() {
           <SectionCard
             title="Pending confirmations"
             description="Review grouped submissions and approve, reject, or propose new arrival dates."
-            action={
-              <Button
-                type="button"
-                variant="contained"
-                startIcon={<AutorenewRoundedIcon />}
-                onClick={loadRequests}
-                disabled={loading}
-              >
-                {loading ? "Refreshing..." : "Refresh list"}
-              </Button>
-            }
             secondaryAction={
               <Chip
                 label={
-                  requestMetrics.groupCount > 0
-                    ? `${requestMetrics.groupCount} group${
-                        requestMetrics.groupCount === 1 ? "" : "s"
+                  filteredGroups.length > 0
+                    ? `${filteredGroups.length} group${
+                        filteredGroups.length === 1 ? "" : "s"
                       } pending`
                     : "No pending groups"
                 }
-                color={requestMetrics.groupCount > 0 ? "warning" : "success"}
+                color={filteredGroups.length > 0 ? "warning" : "success"}
                 variant="outlined"
               />
             }
           >
             <Stack spacing={3}>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  borderRadius: 3,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 1.5,
+                  alignItems: "center",
+                }}
+              >
+                <TextField
+                  label="Filter by importer/requester"
+                  size="small"
+                  value={filterImporter}
+                  onChange={(e) => setFilterImporter(e.target.value)}
+                  sx={{ minWidth: 220 }}
+                />
+                <TextField
+                  label="From (request date)"
+                  type="date"
+                  size="small"
+                  value={filterFrom}
+                  onChange={(e) => setFilterFrom(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label="To (request date)"
+                  type="date"
+                  size="small"
+                  value={filterTo}
+                  onChange={(e) => setFilterTo(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label="Status"
+                  select
+                  size="small"
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  sx={{ minWidth: 140 }}
+                >
+                  <MenuItem value="all">All</MenuItem>
+                  <MenuItem value="pending">Pending</MenuItem>
+                  <MenuItem value="approved">Approved</MenuItem>
+                  <MenuItem value="rejected">Rejected</MenuItem>
+                </TextField>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    type="button"
+                    variant="outlined"
+                    startIcon={<AutorenewRoundedIcon />}
+                    onClick={loadRequests}
+                    disabled={loading}
+                  >
+                    {loading ? "Refreshing..." : "Refresh"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outlined"
+                    startIcon={<FileDownloadOutlinedIcon />}
+                    onClick={handleExportCsv}
+                    disabled={filteredGroups.length === 0}
+                  >
+                    Export CSV
+                  </Button>
+                </Stack>
+              </Paper>
               <Typography variant="body2" color="text.secondary">
                 {lastSyncLabel}
               </Typography>
@@ -467,7 +638,7 @@ export default function ConfirmerDashboard() {
                 >
                   <CircularProgress color="primary" />
                 </Box>
-              ) : groupedRequests.length === 0 ? (
+              ) : filteredGroups.length === 0 ? (
                 <Stack spacing={1} textAlign="center">
                   <Typography variant="h6">You're all caught up</Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -477,7 +648,7 @@ export default function ConfirmerDashboard() {
                 </Stack>
               ) : (
                 <Grid container spacing={3}>
-                  {groupedRequests.map((group) => (
+                  {filteredGroups.map((group) => (
                     <Grid
                       item
                       xs={12}
@@ -492,6 +663,7 @@ export default function ConfirmerDashboard() {
                           handleGroupDecision(selectedGroup, "rejected")
                         }
                         onProposeDate={handleOpenProposal}
+                        onViewHistory={handleOpenHistory}
                       />
                     </Grid>
                   ))}
@@ -552,6 +724,67 @@ export default function ConfirmerDashboard() {
             disabled={proposalSubmitting}
           >
             {proposalSubmitting ? "Saving…" : "Save"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={historyOpen}
+        onClose={historyLoading ? undefined : handleCloseHistory}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Activity history</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            {historyError && <Alert severity="error">{historyError}</Alert>}
+            {historyLoading ? (
+              <Stack alignItems="center" spacing={1} sx={{ py: 4 }}>
+                <CircularProgress size={24} />
+                <Typography variant="body2" color="text.secondary">
+                  Loading history...
+                </Typography>
+              </Stack>
+            ) : historyLogs.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No history found for this batch.
+              </Typography>
+            ) : (
+              <Stack divider={<Divider flexItem />} spacing={1.5}>
+                {historyLogs.map((log, index) => (
+                  <Box key={`${log.Action}-${log.CreatedAt}-${index}`}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <HistoryEduRoundedIcon fontSize="small" />
+                      <Typography variant="subtitle2">{log.Action}</Typography>
+                    </Stack>
+                    <Typography variant="body2" color="text.secondary">
+                      {log.Details || "No details provided."}
+                    </Typography>
+                    <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} useFlexGap flexWrap="wrap">
+                      <Chip
+                        label={log.Username || "Unknown user"}
+                        size="small"
+                        variant="outlined"
+                      />
+                      <Chip
+                        label={
+                          log.CreatedAt
+                            ? new Date(log.CreatedAt).toLocaleString()
+                            : "Unknown time"
+                        }
+                        size="small"
+                        variant="outlined"
+                      />
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseHistory} disabled={historyLoading}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>

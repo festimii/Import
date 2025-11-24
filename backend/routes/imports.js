@@ -2123,6 +2123,14 @@ router.post("/", verifyRole(["requester"]), async (req, res) => {
 
     if (insertedRecords.length > 0) {
       const pool = await poolPromise;
+      await recordRequestLog({
+        pool,
+        batchId,
+        username: req.user.username,
+        action: "created",
+        details: `Created ${insertedRecords.length} article(s) for ${importer}.`,
+        snapshot: JSON.stringify(insertedRecords),
+      });
       await notifyRequestCreation({
         pool,
         records: insertedRecords,
@@ -2534,6 +2542,42 @@ router.get("/", verifyRole(["confirmer", "requester", "admin"]), async (req, res
     res.status(500).json({ message: "Server error" });
   }
 });
+
+router.get(
+  "/batch/:batchId/logs",
+  verifyRole(["admin", "confirmer", "requester"]),
+  async (req, res) => {
+    const normalizedBatchId = normalizeGuidInput(req.params.batchId);
+    if (!isValidGuid(normalizedBatchId)) {
+      return res.status(400).json({ message: "Batch ID i pavlefshëm." });
+    }
+
+    try {
+      const pool = await poolPromise;
+      const result = await pool
+        .request()
+        .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
+        .query(
+          `SELECT TOP 200
+                  Action,
+                  Username,
+                  Details,
+                  Snapshot,
+                  CreatedAt
+             FROM dbo.ImportRequestLogs
+            WHERE BatchId = @BatchId
+            ORDER BY CreatedAt DESC`
+        );
+
+      return res.json(result.recordset || []);
+    } catch (error) {
+      console.error("Fetch batch logs error:", error);
+      return res
+        .status(500)
+        .json({ message: "Nuk mund të marrim historikun për këtë porosi." });
+    }
+  }
+);
 
 // ---------- GET APPROVED REQUESTS (Admin) ----------
 router.get(
@@ -3187,7 +3231,9 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                 ActualArrivalDate AS CurrentActualArrivalDate,
                 LastApprovedArrivalDate AS LastApprovedArrivalDate,
                 Useri AS Requester,
-                Status AS CurrentStatus
+                Status AS CurrentStatus,
+                BatchId,
+                Importuesi AS Importer
          FROM ImportRequests
          WHERE ID = @ID`
       );
@@ -3202,6 +3248,8 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
       LastApprovedArrivalDate: previousApprovedArrivalDate,
       Requester: requesterUsername,
       CurrentStatus,
+      BatchId,
+      Importer,
     } = existingResult.recordset[0];
 
     let arrivalDateSqlValue;
@@ -3290,6 +3338,52 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
                    INSERTED.CreatedAt${batchOutput}
             WHERE ID = @ID`);
     const [record] = mapArticles(result.recordset);
+    const effectiveBatchId = record.BatchId || BatchId || null;
+    const newStatus = status || record.Status || CurrentStatus || "pending";
+
+    const changeDetails = [];
+    if (status && status !== CurrentStatus) {
+      changeDetails.push(
+        `Status: ${CurrentStatus || "pending"} -> ${status}`
+      );
+    }
+    if (arrivalDateSqlValue) {
+      changeDetails.push(
+        `Planned arrival: ${formatNotificationDate(
+          CurrentArrivalDate
+        )} -> ${formatNotificationDate(arrivalDateSqlValue)}`
+      );
+    }
+    if (actualArrivalDateSqlValue) {
+      changeDetails.push(
+        `Actual arrival: ${formatNotificationDate(
+          CurrentActualArrivalDate
+        )} -> ${formatNotificationDate(actualArrivalDateSqlValue)}`
+      );
+    }
+    await recordRequestLog({
+      pool,
+      requestId: record.ID,
+      batchId: effectiveBatchId,
+      username: req.user.username,
+      action: "status_update",
+      details:
+        changeDetails.length > 0
+          ? changeDetails.join(" | ")
+          : `Status checked by ${req.user.username}`,
+      snapshot: JSON.stringify({
+        importer: Importer || null,
+        previousStatus: CurrentStatus,
+        nextStatus: newStatus,
+        previousPlannedArrival: CurrentArrivalDate,
+        nextPlannedArrival:
+          arrivalDateSqlValue || CurrentArrivalDate || null,
+        previousActualArrival: CurrentActualArrivalDate,
+        nextActualArrival:
+          actualArrivalDateSqlValue || CurrentActualArrivalDate || null,
+      }),
+    });
+
     const normalizedStatus = status
       ? String(status).toLowerCase()
       : null;
