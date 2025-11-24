@@ -1952,39 +1952,46 @@ const notifyRequestCreation = async ({ pool, records, initiatorUsername }) => {
     return;
   }
 
-  const newRequestRoles = ["admin", "confirmer"];
+  const newRequestRoles = ["admin", "confirmer", "requester"];
+  const primaryRecord = records[0];
+  const totalArticles = records.length;
 
-  for (const record of records) {
-    const copy = buildNotificationCopy({
-      action: "created",
-      record,
-      actor: initiatorUsername,
-      metadata: {
-        arrivalDate:
-          record.ArrivalDate || record.PlannedArrivalDate || record.RequestDate,
+  const arrivalReference =
+    primaryRecord.ArrivalDate ||
+    primaryRecord.PlannedArrivalDate ||
+    primaryRecord.RequestDate;
+  const arrivalLabel = formatNotificationDate(arrivalReference);
+  const userLabel =
+    trimString(initiatorUsername) ||
+    trimString(primaryRecord.Requester) ||
+    "përdoruesi";
+  const billName = formatBillName(primaryRecord);
+  const articleLabel =
+    totalArticles === 1
+      ? "1 artikull"
+      : `${totalArticles} artikuj në batch`;
+  const summary = `${billName} | ${arrivalLabel} | ${userLabel}`;
+  const message = `${summary} - ${articleLabel}.`;
+  const pushBody = `${arrivalLabel} | ${userLabel} - ${articleLabel}.`;
+
+  try {
+    await dispatchNotificationEvent(pool, {
+      requestId: primaryRecord.ID,
+      message,
+      type: "request_created",
+      roles: newRequestRoles,
+      push: {
+        title: billName,
+        body: pushBody,
+        data: { intent: "request_created" },
+        tag: "request-" + primaryRecord.ID + "-created",
       },
     });
-
-    try {
-      await dispatchNotificationEvent(pool, {
-        requestId: record.ID,
-        message: copy.message,
-        type: "request_created",
-        roles: newRequestRoles,
-        excludeUsername: initiatorUsername,
-        push: {
-          title: copy.pushTitle,
-          body: copy.pushBody,
-          data: { intent: "request_created" },
-          tag: "request-" + record.ID + "-created",
-        },
-      });
-    } catch (notificationError) {
-      console.error(
-        "Request creation notification error:",
-        notificationError.message
-      );
-    }
+  } catch (notificationError) {
+    console.error(
+      "Request creation notification error:",
+      notificationError.message
+    );
   }
 };
 
@@ -3119,8 +3126,7 @@ router.patch(
           requestId: record.ID,
           message: updateMessage,
           type: "requester_arrival_update",
-          roles: ["admin", "confirmer"],
-          excludeUsername: req.user.username,
+          roles: ["admin", "confirmer", "requester"],
           push: {
             title: "Arrival date changed",
             body: updateMessage,
@@ -3307,7 +3313,11 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     }
 
     const notificationsToDispatch = [];
-    const defaultNotificationRoles = ["admin", "confirmer"];
+    const defaultNotificationRoles = [
+      "admin",
+      "confirmer",
+      "requester",
+    ];
     const requesterAudience = requesterUsername
       ? [requesterUsername]
       : undefined;
@@ -3427,7 +3437,6 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
           type: notification.type,
           usernames: notification.usernames || requesterAudience,
           roles: notification.roles || defaultNotificationRoles,
-          excludeUsername: req.user.username,
           push: {
             title: pushTitle,
             body: pushBody,
@@ -3585,8 +3594,7 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
       requestId: primaryRecord.ID,
       message: copy.message,
       type: "request_updated",
-      roles: ["admin", "confirmer"],
-      excludeUsername: req.user.username,
+      roles: ["admin", "confirmer", "requester"],
       push: {
         title: copy.pushTitle,
         body: copy.pushBody,
@@ -3681,8 +3689,7 @@ router.delete(
         requestId: referenceRecord.ID,
         message: copy.message,
         type: "request_deleted",
-        roles: ["admin", "confirmer"],
-        excludeUsername: req.user.username,
+        roles: ["admin", "confirmer", "requester"],
         push: {
           title: copy.pushTitle,
           body: copy.pushBody,
