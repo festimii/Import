@@ -102,7 +102,14 @@ router.post("/send", verifyRole(["admin", "confirmer"]), async (req, res) => {
 // 4️⃣  IMPROVED: SEND PUSH WHEN NEW RECORD INSERTED
 // ===========================================================
 router.post("/create", verifyRole(allowedRoles), async (req, res) => {
-  const { RequestID, Message, Type, TargetUsername, Audience } = req.body;
+  const {
+    RequestID,
+    Message,
+    Type,
+    TargetUsername,
+    Audience,
+    AudienceRoles,
+  } = req.body;
 
   if (!RequestID || !Message) {
     return res.status(400).json({ message: "Missing required notification data." });
