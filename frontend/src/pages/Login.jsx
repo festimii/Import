@@ -48,6 +48,9 @@ export default function Login() {
       subtitle="Sign in to manage import requests, collaborate with approvers and keep deliveries on track."
       footer={
         <Stack spacing={1} textAlign="center">
+          <Link component={RouterLink} to="/help" underline="hover">
+            How the app works (Help)
+          </Link>
           <Link component={RouterLink} to="/register" underline="hover">
             Create a new account
           </Link>

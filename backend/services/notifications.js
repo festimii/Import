@@ -113,9 +113,47 @@ export const createNotifications = async (
   }
 
   if (Array.isArray(usernames) && usernames.length > 0) {
+    const uniqueUsernames = uniqueStrings(usernames);
+    if (uniqueUsernames.length === 0) {
+      return [];
+    }
+
+    // Skip if the same notification already exists for a user (same request, type, and message)
+    const lookup = pool.request();
+    lookup.input("RequestID", requestId);
+    lookup.input("Message", safeMessage);
+    lookup.input("Type", type);
+
+    const usernameParams = uniqueUsernames.map((username, index) => {
+      const param = `Username${index}`;
+      lookup.input(param, username);
+      return `@${param}`;
+    });
+
+    const existingResult = await lookup.query(
+      `SELECT Username
+       FROM RequestNotifications
+       WHERE RequestID = @RequestID
+         AND Type = @Type
+         AND Message = @Message
+         AND Username IN (${usernameParams.join(", ")})`
+    );
+
+    const alreadyNotified = new Set(
+      existingResult.recordset?.map((row) => row.Username) || []
+    );
+
+    const recipients = uniqueUsernames.filter(
+      (username) => !alreadyNotified.has(username)
+    );
+
+    if (recipients.length === 0) {
+      return [];
+    }
+
     const inserted = [];
 
-    for (const username of usernames) {
+    for (const username of recipients) {
       if (!username) continue;
 
       const result = await pool
@@ -148,6 +186,14 @@ export const createNotifications = async (
             SELECT @RequestID, Username, @Message, @Type
             FROM Users
             WHERE (@ExcludeUsername IS NULL OR Username <> @ExcludeUsername)
+              AND NOT EXISTS (
+                SELECT 1
+                FROM RequestNotifications rn
+                WHERE rn.RequestID = @RequestID
+                  AND rn.Type = @Type
+                  AND rn.Message = @Message
+                  AND rn.Username = Users.Username
+              )
             OUTPUT INSERTED.ID, INSERTED.RequestID, INSERTED.Username,
                    INSERTED.Message, INSERTED.Type, INSERTED.CreatedAt,
                    INSERTED.ReadAt`);

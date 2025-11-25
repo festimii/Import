@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -34,6 +34,7 @@ import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import UndoRoundedIcon from "@mui/icons-material/UndoRounded";
+import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import API from "../api";
 import formatArticleCode, { formatArticleLabel } from "../utils/formatArticle";
 import CalendarOverview from "../components/CalendarOverview";
@@ -1260,6 +1261,15 @@ export default function RequesterDashboard() {
         title="Stock Menagment"
         subtitle=""
         actions={[
+          <Button
+            key="help"
+            variant="text"
+            component={RouterLink}
+            to="/help"
+            startIcon={<HelpOutlineRoundedIcon />}
+          >
+            Help
+          </Button>,
           <Button
             key="history"
             variant="outlined"

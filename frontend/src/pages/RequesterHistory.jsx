@@ -21,7 +21,8 @@ import {
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
+import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import API from "../api";
 import SectionCard from "../components/SectionCard";
 import PageHero from "../components/PageHero";
@@ -217,6 +218,15 @@ export default function RequesterHistory() {
         title="Historiku i Porosive"
         subtitle="Filtroni dhe eksportoni porosite e derguara dhe konfirmimet"
         actions={[
+          <Button
+            key="help"
+            variant="text"
+            component={RouterLink}
+            to="/help"
+            startIcon={<HelpOutlineRoundedIcon />}
+          >
+            Help
+          </Button>,
           <Button
             key="dashboard"
             variant="outlined"

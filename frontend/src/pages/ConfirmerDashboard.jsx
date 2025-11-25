@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -25,6 +26,7 @@ import HistoryEduRoundedIcon from "@mui/icons-material/HistoryEduRounded";
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import ViewInArRoundedIcon from "@mui/icons-material/ViewInArRounded";
+import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import API from "../api";
 import RequestGroupCard from "../components/RequestGroupCard";
 import CalendarOverview from "../components/CalendarOverview";
@@ -471,6 +473,15 @@ export default function ConfirmerDashboard() {
         title="VIVA Fresh Imports Tracker"
         subtitle=""
         actions={[
+          <Button
+            key="help"
+            variant="text"
+            component={RouterLink}
+            to="/help"
+            startIcon={<HelpOutlineRoundedIcon />}
+          >
+            Help
+          </Button>,
           <NotificationMenu key="notifications" />,
           <Button
             key="logout"

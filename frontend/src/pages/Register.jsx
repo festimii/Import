@@ -56,6 +56,9 @@ export default function Register() {
       accent="Team onboarding"
       footer={
         <Stack spacing={1} textAlign="center">
+          <Link component={RouterLink} to="/help" underline="hover">
+            How the app works (Help)
+          </Link>
           <Link component={RouterLink} to="/" underline="hover">
             Already have an account? Sign in
           </Link>

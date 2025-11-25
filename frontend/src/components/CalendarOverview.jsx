@@ -1298,10 +1298,30 @@ const CalendarOverview = ({
                       borderRadius: 2,
                       px: 1.5,
                       py: 1,
-                      backgroundColor: (theme) =>
-                        alpha(theme.palette.success.main, 0.08),
-                      border: (theme) =>
-                        `1px solid ${alpha(theme.palette.success.main, 0.2)}`,
+                      backgroundColor: (theme) => {
+                        if (batch.ActualArrivalDate) {
+                          return alpha(theme.palette.info.main, 0.08);
+                        }
+                        if (isPastArrival) {
+                          return alpha(theme.palette.warning.main, 0.12);
+                        }
+                        return alpha(theme.palette.success.main, 0.08);
+                      },
+                      border: (theme) => {
+                        if (batch.ActualArrivalDate) {
+                          return `1px solid ${alpha(theme.palette.info.main, 0.2)}`;
+                        }
+                        if (isPastArrival) {
+                          return `1px solid ${alpha(
+                            theme.palette.warning.main,
+                            0.25
+                          )}`;
+                        }
+                        return `1px solid ${alpha(
+                          theme.palette.success.main,
+                          0.2
+                        )}`;
+                      },
                       display: "flex",
                       flexDirection: "column",
                       gap: 0.5,

@@ -62,7 +62,10 @@ const normalizeDateForBatch = (value) => {
 
 const hashTextToGuid = (value) => {
   const hex = createHash("sha256").update(value).digest("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+    12,
+    16
+  )}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 };
 
 const deriveBatchIdFromCombination = ({
@@ -188,9 +191,7 @@ const annotateSplitComment = ({
   }
 
   const rolePrefix =
-    role === "remaining"
-      ? "Ndarje nga dokumenti"
-      : "Dorëzuar sipas dokumentit";
+    role === "remaining" ? "Ndarje nga dokumenti" : "Dorëzuar sipas dokumentit";
 
   const parts = [`${rolePrefix} ${normalizedDocument}`];
   const batchCode = formatBatchCode(relatedBatchId);
@@ -256,9 +257,7 @@ const normalizeGuidInput = (value) => {
     const formatted = `${compact.slice(0, 8)}-${compact.slice(
       8,
       12
-    )}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(
-      20
-    )}`;
+    )}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
     return isValidGuid(formatted) ? formatted : null;
   }
   return null;
@@ -354,19 +353,17 @@ const aggregateImportItemsByArticle = (items = []) => {
     const articleCode = normalizeArticleCode(item.Article);
     if (!articleCode) continue;
 
-    const entry =
-      map.get(articleCode) || {
-        boxes: 0,
-        pallets: 0,
-        template: {
-          importer:
-            trimString(item.Importer ?? item.Importuesi ?? item.importer) ??
-            null,
-          requestDateSql: toSqlDateString(item.RequestDate),
-          arrivalDateSql: toSqlDateString(item.PlannedArrivalDate),
-          comment: sanitizeComment(item.Comment),
-        },
-      };
+    const entry = map.get(articleCode) || {
+      boxes: 0,
+      pallets: 0,
+      template: {
+        importer:
+          trimString(item.Importer ?? item.Importuesi ?? item.importer) ?? null,
+        requestDateSql: toSqlDateString(item.RequestDate),
+        arrivalDateSql: toSqlDateString(item.PlannedArrivalDate),
+        comment: sanitizeComment(item.Comment),
+      },
+    };
 
     entry.boxes += numberOrNull(item.BoxCount) ?? 0;
     entry.pallets += numberOrNull(item.PalletCount) ?? 0;
@@ -423,15 +420,15 @@ const describeActionDetails = (action, metadata = {}) => {
         : null;
 
       if (previous && next && previous !== next) {
-        return `Mbërritja faktike në depo: ${previous} -> ${next}`;
+        return `Mbërritja në depo: ${previous} -> ${next}`;
       }
       if (next) {
-        return `Mbërritja faktike në depo: ${next}`;
+        return `Mbërritja në depo: ${next}`;
       }
       if (previous) {
-        return `Mbërritja faktike në depo: ${previous}`;
+        return `Mbërritja në depo: ${previous}`;
       }
-      return "Mbërritja faktike në depo u përditësua";
+      return "Mbërritja  në depo u përditësua";
     }
     case "status":
       return describeStatusInAlbanian(metadata.status);
@@ -444,12 +441,7 @@ const describeActionDetails = (action, metadata = {}) => {
   }
 };
 
-const buildNotificationCopy = ({
-  action,
-  record,
-  actor,
-  metadata = {},
-}) => {
+const buildNotificationCopy = ({ action, record, actor, metadata = {} }) => {
   const billName = formatBillName(record);
   const arrivalReference =
     metadata.arrivalDate ||
@@ -793,8 +785,7 @@ const mapArticles = (records, batchDocuments = null) =>
     }
 
     const rawArrival = mapped.ArrivalDate ?? null;
-    const plannedArrival =
-      mapped.PlannedArrivalDate ?? rawArrival ?? null;
+    const plannedArrival = mapped.PlannedArrivalDate ?? rawArrival ?? null;
     if (mapped.PlannedArrivalDate === undefined) {
       mapped.PlannedArrivalDate = plannedArrival;
     }
@@ -828,7 +819,8 @@ const mapArticles = (records, batchDocuments = null) =>
           unmatched: payload?.unmatchedDocumentArticles ?? null,
           generatedAt: payload?.generatedAt ?? null,
           role: splitInfo.role || "delivered",
-          relatedBatchId: splitInfo.relatedBatchId || splitInfo.sourceBatchId || null,
+          relatedBatchId:
+            splitInfo.relatedBatchId || splitInfo.sourceBatchId || null,
         };
       }
     }
@@ -1672,8 +1664,7 @@ const insertImportRequestItems = async ({
 
   const pool = await poolPromise;
   const secondaryPool = await secondaryPoolPromise;
-  const transaction =
-    transactionOverride ?? new sql.Transaction(pool);
+  const transaction = transactionOverride ?? new sql.Transaction(pool);
   const ownsTransaction = !transactionOverride;
   const insertedRecords = [];
   const articleNameLookup = await fetchArticleNames(
@@ -1698,9 +1689,7 @@ const insertImportRequestItems = async ({
         current.importer ?? current.Importuesi ?? importer
       );
       if (!importerValue) {
-        const error = new Error(
-          `Importer is required for item ${index + 1}.`
-        );
+        const error = new Error(`Importer is required for item ${index + 1}.`);
         error.meta = {
           itemIndex: index + 1,
           article: current.article,
@@ -1738,16 +1727,15 @@ const insertImportRequestItems = async ({
         throw error;
       }
 
-      const resolvedBatchId =
-        includeBatchId
-          ? current.batchId ??
-            deriveBatchIdFromCombination({
-              importer: importerValue,
-              requestDate: requestDateValue,
-              arrivalDate: arrivalDateValue,
-              fallbackId: effectiveBatchId,
-            })
-          : null;
+      const resolvedBatchId = includeBatchId
+        ? current.batchId ??
+          deriveBatchIdFromCombination({
+            importer: importerValue,
+            requestDate: requestDateValue,
+            arrivalDate: arrivalDateValue,
+            fallbackId: effectiveBatchId,
+          })
+        : null;
 
       let calculation = current.calculation ?? null;
       if (!calculation) {
@@ -1967,9 +1955,7 @@ const notifyRequestCreation = async ({ pool, records, initiatorUsername }) => {
     "përdoruesi";
   const billName = formatBillName(primaryRecord);
   const articleLabel =
-    totalArticles === 1
-      ? "1 artikull"
-      : `${totalArticles} artikuj në batch`;
+    totalArticles === 1 ? "1 artikull" : `${totalArticles} artikuj në batch`;
   const summary = `${billName} | ${arrivalLabel} | ${userLabel}`;
   const message = `${summary} - ${articleLabel}.`;
   const pushBody = `${arrivalLabel} | ${userLabel} - ${articleLabel}.`;
@@ -2184,9 +2170,7 @@ const parseSqlDateOrFallback = (value, label, fallback) => {
     return fallbackDate;
   }
 
-  throw new Error(
-    label || "Invalid date provided."
-  );
+  throw new Error(label || "Invalid date provided.");
 };
 
 const normalizeRequesterItemsPayload = (items, defaultComment) => {
@@ -2313,7 +2297,9 @@ router.post(
       const normalizedItems = [];
       const uniqueImporters = new Set();
       const uniqueArrivals = new Set();
-      let lastImporterValue = importerFromBody ? trimString(importerFromBody) : null;
+      let lastImporterValue = importerFromBody
+        ? trimString(importerFromBody)
+        : null;
       let lastArrivalDateSqlValue = arrivalDateSqlFallback ?? null;
 
       for (let index = 0; index < excelItems.length; index += 1) {
@@ -2337,7 +2323,9 @@ router.post(
           lastArrivalDateSqlValue = arrivalSqlFromExcel;
         }
         const arrivalSqlValue =
-          arrivalSqlFromExcel ?? lastArrivalDateSqlValue ?? arrivalDateSqlFallback;
+          arrivalSqlFromExcel ??
+          lastArrivalDateSqlValue ??
+          arrivalDateSqlFallback;
 
         if (!arrivalSqlValue) {
           return res.status(400).json({
@@ -2438,20 +2426,15 @@ router.post(
   }
 );
 
-router.get(
-  "/mine",
-  verifyRole(["requester"]),
-  async (req, res) => {
-    try {
-      const { hasBatchId } = await getImportRequestFeatureState();
-      const batchProjection = hasBatchId
-        ? ", BatchId"
-        : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
-      const pool = await poolPromise;
-      const result = await pool
-        .request()
-        .input("Requester", req.user.username)
-        .query(`SELECT ID,
+router.get("/mine", verifyRole(["requester"]), async (req, res) => {
+  try {
+    const { hasBatchId } = await getImportRequestFeatureState();
+    const batchProjection = hasBatchId
+      ? ", BatchId"
+      : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
+    const pool = await poolPromise;
+    const result = await pool.request().input("Requester", req.user.username)
+      .query(`SELECT ID,
                        DataKerkeses AS RequestDate,
                        DataArritjes AS PlannedArrivalDate,
                        ActualArrivalDate,
@@ -2484,24 +2467,27 @@ router.get(
                 FROM ImportRequests
                 WHERE Useri = @Requester
                 ORDER BY CreatedAt DESC`);
-      const batchDocuments =
-        hasBatchId ? await fetchBatchDocumentMap(pool) : null;
-      res.json(mapArticles(result.recordset, batchDocuments));
-    } catch (err) {
-      console.error("Fetch requester imports error:", err.message);
-      res.status(500).json({ message: "Server error" });
-    }
+    const batchDocuments = hasBatchId
+      ? await fetchBatchDocumentMap(pool)
+      : null;
+    res.json(mapArticles(result.recordset, batchDocuments));
+  } catch (err) {
+    console.error("Fetch requester imports error:", err.message);
+    res.status(500).json({ message: "Server error" });
   }
-);
+});
 // ---------- GET PENDING REQUESTS (Confirmer) ----------
-router.get("/", verifyRole(["confirmer", "requester", "admin"]), async (req, res) => {
-  try {
-    const { hasBatchId } = await getImportRequestFeatureState();
-    const batchProjection = hasBatchId
-      ? ", BatchId"
-      : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
-    const pool = await poolPromise;
-    const result = await pool.request().query(`SELECT ID,
+router.get(
+  "/",
+  verifyRole(["confirmer", "requester", "admin"]),
+  async (req, res) => {
+    try {
+      const { hasBatchId } = await getImportRequestFeatureState();
+      const batchProjection = hasBatchId
+        ? ", BatchId"
+        : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
+      const pool = await poolPromise;
+      const result = await pool.request().query(`SELECT ID,
                      DataKerkeses AS RequestDate,
                      DataArritjes AS PlannedArrivalDate,
                      ActualArrivalDate,
@@ -2534,14 +2520,16 @@ router.get("/", verifyRole(["confirmer", "requester", "admin"]), async (req, res
               FROM ImportRequests
               WHERE Status = 'pending'
               ORDER BY CreatedAt DESC`);
-    const batchDocuments =
-      hasBatchId ? await fetchBatchDocumentMap(pool) : null;
-    res.json(mapArticles(result.recordset, batchDocuments));
-  } catch (err) {
-    console.error("Fetch error:", err.message);
-    res.status(500).json({ message: "Server error" });
+      const batchDocuments = hasBatchId
+        ? await fetchBatchDocumentMap(pool)
+        : null;
+      res.json(mapArticles(result.recordset, batchDocuments));
+    } catch (err) {
+      console.error("Fetch error:", err.message);
+      res.status(500).json({ message: "Server error" });
+    }
   }
-});
+);
 
 router.get(
   "/batch/:batchId/logs",
@@ -2623,10 +2611,11 @@ router.get(
               FROM ImportRequests
               WHERE Status = 'approved'
               ORDER BY DataArritjes ASC, CreatedAt DESC`);
-    const batchDocuments =
-      hasBatchId ? await fetchBatchDocumentMap(pool) : null;
-    res.json(mapArticles(result.recordset, batchDocuments));
-  } catch (err) {
+      const batchDocuments = hasBatchId
+        ? await fetchBatchDocumentMap(pool)
+        : null;
+      res.json(mapArticles(result.recordset, batchDocuments));
+    } catch (err) {
       console.error("Fetch approved error:", err.message);
       res.status(500).json({ message: "Server error" });
     }
@@ -2695,8 +2684,9 @@ router.get(
                   AND OrderTypeCode = 51`),
       ]);
 
-      const batchDocuments =
-        hasBatchId ? await fetchBatchDocumentMap(pool) : null;
+      const batchDocuments = hasBatchId
+        ? await fetchBatchDocumentMap(pool)
+        : null;
 
       res.json({
         confirmedImports: mapArticles(
@@ -3066,7 +3056,9 @@ router.patch(
     if (!arrivalDate) {
       return res
         .status(400)
-        .json({ message: "An arrival date is required to update the request." });
+        .json({
+          message: "An arrival date is required to update the request.",
+        });
     }
 
     try {
@@ -3111,8 +3103,7 @@ router.patch(
       const updateResult = await pool
         .request()
         .input("ID", req.params.id)
-        .input("ArrivalDate", arrivalDateSqlValue)
-        .query(`UPDATE ImportRequests
+        .input("ArrivalDate", arrivalDateSqlValue).query(`UPDATE ImportRequests
                 SET DataArritjes = @ArrivalDate,
                     Status = 'pending',
                     ConfirmedBy = NULL
@@ -3271,8 +3262,9 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
           .status(400)
           .json({ message: "Invalid actual arrival date provided." });
       }
-      actualArrivalDateSqlValue =
-        actualArrivalDateValue.toISOString().split("T")[0];
+      actualArrivalDateSqlValue = actualArrivalDateValue
+        .toISOString()
+        .split("T")[0];
     }
 
     const updateRequest = pool
@@ -3343,9 +3335,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
 
     const changeDetails = [];
     if (status && status !== CurrentStatus) {
-      changeDetails.push(
-        `Status: ${CurrentStatus || "pending"} -> ${status}`
-      );
+      changeDetails.push(`Status: ${CurrentStatus || "pending"} -> ${status}`);
     }
     if (arrivalDateSqlValue) {
       changeDetails.push(
@@ -3376,17 +3366,14 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
         previousStatus: CurrentStatus,
         nextStatus: newStatus,
         previousPlannedArrival: CurrentArrivalDate,
-        nextPlannedArrival:
-          arrivalDateSqlValue || CurrentArrivalDate || null,
+        nextPlannedArrival: arrivalDateSqlValue || CurrentArrivalDate || null,
         previousActualArrival: CurrentActualArrivalDate,
         nextActualArrival:
           actualArrivalDateSqlValue || CurrentActualArrivalDate || null,
       }),
     });
 
-    const normalizedStatus = status
-      ? String(status).toLowerCase()
-      : null;
+    const normalizedStatus = status ? String(status).toLowerCase() : null;
     const revertToLastApprovedSql =
       normalizedStatus === "rejected"
         ? toSqlDateString(previousApprovedArrivalDate)
@@ -3421,11 +3408,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     }
 
     const notificationsToDispatch = [];
-    const defaultNotificationRoles = [
-      "admin",
-      "confirmer",
-      "requester",
-    ];
+    const defaultNotificationRoles = ["admin", "confirmer", "requester"];
     const requesterAudience = requesterUsername
       ? [requesterUsername]
       : undefined;
@@ -3515,9 +3498,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     }
 
     if (revertToLastApprovedSql) {
-      const revertLabel = formatNotificationDate(
-        revertToLastApprovedSql
-      );
+      const revertLabel = formatNotificationDate(revertToLastApprovedSql);
       const revertMessage = revertLabel
         ? `Ndryshimi i datës u refuzua. Data u kthye në ${revertLabel}.`
         : "Ndryshimi i datës u refuzua dhe u rikthye në datën e fundit të miratuar.";
@@ -3535,8 +3516,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
     for (const notification of notificationsToDispatch) {
       try {
         const intent = notification.intent || notification.type;
-        const pushTitle =
-          notification.pushTitle || formatBillName(record);
+        const pushTitle = notification.pushTitle || formatBillName(record);
         const pushBody = notification.pushBody || notification.message;
 
         await dispatchNotificationEvent(pool, {
@@ -3835,68 +3815,65 @@ router.post(
     }
 
     try {
-      const [docPool, pool] = await Promise.all([
-        docPoolPromise,
-        poolPromise,
+      const [docPool, pool] = await Promise.all([docPoolPromise, poolPromise]);
+
+      const [documentLines, secondaryPool] = await Promise.all([
+        (async () => {
+          try {
+            const documentRequest = docPool
+              .request()
+              .input("Sifra_oe", sql.Int, Number(sifraOe) || null)
+              .input("Sifra_dok", sql.Int, Number(sifraDok) || null)
+              .input("Broj_Dok", sql.NVarChar(50), brojDokValue)
+              .input("Sifra_Prim", sql.NVarChar(50), sifraPrim || null)
+              .input("Imadodatna", sql.NVarChar(50), imaDodatna || null)
+              .input("PodrediOpc", sql.NVarChar(5), podrediOpc || null);
+
+            const docResult = await documentRequest.execute(
+              "[dbo].[SP_StavkiPoDok]"
+            );
+            if (
+              Array.isArray(docResult.recordsets) &&
+              docResult.recordsets.length > 0 &&
+              Array.isArray(docResult.recordsets[0])
+            ) {
+              return docResult.recordsets[0];
+            }
+            if (docResult.recordset) {
+              return docResult.recordset;
+            }
+            return [];
+          } catch (docError) {
+            console.error("Document retrieval error:", docError);
+            throw docError;
+          }
+        })(),
+        secondaryPoolPromise,
       ]);
 
-    const [documentLines, secondaryPool] = await Promise.all([
-      (async () => {
-        try {
-          const documentRequest = docPool
-            .request()
-            .input("Sifra_oe", sql.Int, Number(sifraOe) || null)
-            .input("Sifra_dok", sql.Int, Number(sifraDok) || null)
-            .input("Broj_Dok", sql.NVarChar(50), brojDokValue)
-            .input("Sifra_Prim", sql.NVarChar(50), sifraPrim || null)
-            .input("Imadodatna", sql.NVarChar(50), imaDodatna || null)
-            .input("PodrediOpc", sql.NVarChar(5), podrediOpc || null);
+      if (!documentLines || documentLines.length === 0) {
+        console.warn(
+          "SP_StavkiPoDok returned no rows:",
+          JSON.stringify({
+            sifraOe,
+            sifraDok,
+            brojDok: brojDokValue,
+            sifraPrim,
+            imaDodatna,
+            podrediOpc,
+          })
+        );
+        return res.status(404).json({
+          message:
+            "Dokumenti nuk u gjet ose nuk ka rreshta. Ju lutemi verifikoni parametrat.",
+          details: { sifraOe, sifraDok, brojDok: brojDokValue },
+        });
+      }
 
-          const docResult = await documentRequest.execute(
-            "[dbo].[SP_StavkiPoDok]"
-          );
-          if (
-            Array.isArray(docResult.recordsets) &&
-            docResult.recordsets.length > 0 &&
-            Array.isArray(docResult.recordsets[0])
-          ) {
-            return docResult.recordsets[0];
-          }
-          if (docResult.recordset) {
-            return docResult.recordset;
-          }
-          return [];
-        } catch (docError) {
-          console.error("Document retrieval error:", docError);
-          throw docError;
-        }
-      })(),
-      secondaryPoolPromise,
-    ]);
-
-    if (!documentLines || documentLines.length === 0) {
-      console.warn(
-        "SP_StavkiPoDok returned no rows:",
-        JSON.stringify({
-          sifraOe,
-          sifraDok,
-          brojDok: brojDokValue,
-          sifraPrim,
-          imaDodatna,
-          podrediOpc,
-        })
-      );
-      return res.status(404).json({
-        message:
-          "Dokumenti nuk u gjet ose nuk ka rreshta. Ju lutemi verifikoni parametrat.",
-        details: { sifraOe, sifraDok, brojDok: brojDokValue },
-      });
-    }
-
-    const importItemsResult = await pool
-      .request()
-      .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
-      .query(`SELECT ID,
+      const importItemsResult = await pool
+        .request()
+        .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
+        .query(`SELECT ID,
                      Artikulli AS Article,
                      NumriPakove AS BoxCount,
                      NumriPaletave AS PalletCount,
@@ -3904,373 +3881,372 @@ router.post(
               FROM dbo.ImportRequests
               WHERE BatchId = @BatchId`);
 
-    const importItems = importItemsResult.recordset || [];
-    if (importItems.length === 0) {
-      return res.status(404).json({ message: "Porosia nuk u gjet." });
-    }
-    const importTotals = aggregateImportItemsByArticle(importItems);
-    const originalRequestDateSql =
-      toSqlDateString(importItems[0]?.RequestDate) || null;
-    const originalArrivalDateSql =
-      toSqlDateString(importItems[0]?.PlannedArrivalDate) || null;
-    const documentArrivalDateSql =
-      findFirstDocumentArrivalDate(documentLines);
-    const todaySql = toSqlDateString(new Date());
+      const importItems = importItemsResult.recordset || [];
+      if (importItems.length === 0) {
+        return res.status(404).json({ message: "Porosia nuk u gjet." });
+      }
+      const importTotals = aggregateImportItemsByArticle(importItems);
+      const originalRequestDateSql =
+        toSqlDateString(importItems[0]?.RequestDate) || null;
+      const originalArrivalDateSql =
+        toSqlDateString(importItems[0]?.PlannedArrivalDate) || null;
+      const documentArrivalDateSql =
+        findFirstDocumentArrivalDate(documentLines);
+      const todaySql = toSqlDateString(new Date());
 
-    const documentTotals = new Map();
+      const documentTotals = new Map();
 
-    const lines = await Promise.all(
-      documentLines.map(async (line, index) => {
-        const normalizedArticle = resolveDocumentArticleCode(line);
-        const documentPieces = extractDocumentQuantity(line);
-        let documentBoxes = null;
-        let documentPallets = null;
-        let conversionError = null;
+      const lines = await Promise.all(
+        documentLines.map(async (line, index) => {
+          const normalizedArticle = resolveDocumentArticleCode(line);
+          const documentPieces = extractDocumentQuantity(line);
+          let documentBoxes = null;
+          let documentPallets = null;
+          let conversionError = null;
 
-        if (documentPieces === 0) {
-          documentBoxes = 0;
-        } else if (normalizedArticle && documentPieces > 0) {
-          try {
-            const calculation = await calculatePalletization(secondaryPool, {
-              article: normalizedArticle,
-              boxCount: null,
-              pieceCount: Math.max(
-                0,
-                Math.round(Number(documentPieces) || 0)
-              ),
-            });
-            const derivedBoxes = deriveBoxesFromCalculation(calculation);
-            documentBoxes =
-              typeof derivedBoxes === "number"
-                ? Number(derivedBoxes.toFixed(6))
-                : null;
-            documentPallets =
-              typeof calculation.totalPalletPositions === "number"
-                ? Number(calculation.totalPalletPositions.toFixed(6))
-                : null;
-          } catch (conversionIssue) {
-            conversionError =
-              conversionIssue?.message ||
-              "Nuk mundëm të llogarisim kutitë për këtë artikull.";
+          if (documentPieces === 0) {
+            documentBoxes = 0;
+          } else if (normalizedArticle && documentPieces > 0) {
+            try {
+              const calculation = await calculatePalletization(secondaryPool, {
+                article: normalizedArticle,
+                boxCount: null,
+                pieceCount: Math.max(
+                  0,
+                  Math.round(Number(documentPieces) || 0)
+                ),
+              });
+              const derivedBoxes = deriveBoxesFromCalculation(calculation);
+              documentBoxes =
+                typeof derivedBoxes === "number"
+                  ? Number(derivedBoxes.toFixed(6))
+                  : null;
+              documentPallets =
+                typeof calculation.totalPalletPositions === "number"
+                  ? Number(calculation.totalPalletPositions.toFixed(6))
+                  : null;
+            } catch (conversionIssue) {
+              conversionError =
+                conversionIssue?.message ||
+                "Nuk mundëm të llogarisim kutitë për këtë artikull.";
+            }
           }
-        }
 
-        if (normalizedArticle) {
-          const totalsEntry =
-            documentTotals.get(normalizedArticle) || {
+          if (normalizedArticle) {
+            const totalsEntry = documentTotals.get(normalizedArticle) || {
               pieces: 0,
               boxes: 0,
               pallets: 0,
             };
-          totalsEntry.pieces += documentPieces;
-          if (documentBoxes !== null) {
-            totalsEntry.boxes += documentBoxes;
+            totalsEntry.pieces += documentPieces;
+            if (documentBoxes !== null) {
+              totalsEntry.boxes += documentBoxes;
+            }
+            if (documentPallets !== null) {
+              totalsEntry.pallets += documentPallets;
+            }
+            documentTotals.set(normalizedArticle, totalsEntry);
           }
-          if (documentPallets !== null) {
-            totalsEntry.pallets += documentPallets;
-          }
-          documentTotals.set(normalizedArticle, totalsEntry);
+
+          const importStats =
+            normalizedArticle && importTotals.has(normalizedArticle)
+              ? importTotals.get(normalizedArticle)
+              : null;
+          const importQuantity = importStats?.boxes ?? null;
+          const importPallets = importStats?.pallets ?? null;
+
+          const boxesToCompare =
+            documentBoxes === null && conversionError
+              ? null
+              : documentBoxes ?? documentPieces;
+
+          return {
+            index: line.RBr ?? index + 1,
+            article: line.Sifra_Art ?? null,
+            normalizedArticle,
+            description:
+              line.ImeMat ||
+              line.ImeArt ||
+              line.ImeArt2 ||
+              line.Alt_Ime ||
+              line.Alt_Ime2 ||
+              null,
+            documentPieces,
+            documentBoxes,
+            documentPallets,
+            importQuantity,
+            importPallets,
+            remainingQuantity:
+              importQuantity === null || boxesToCompare === null
+                ? null
+                : Number((importQuantity - boxesToCompare).toFixed(6)),
+            remainingPallets:
+              importPallets === null || documentPallets === null
+                ? null
+                : Number((importPallets - documentPallets).toFixed(6)),
+            conversionError,
+          };
+        })
+      );
+
+      const summary = Array.from(importTotals.entries()).map(
+        ([articleCode, importStats]) => {
+          const docStats = documentTotals.get(articleCode) || {
+            boxes: 0,
+            pallets: 0,
+          };
+
+          return {
+            article: articleCode,
+            importQuantity: Number(importStats.boxes.toFixed(6)),
+            documentQuantity: Number(docStats.boxes.toFixed(6)),
+            remainingQuantity: Number(
+              (importStats.boxes - docStats.boxes).toFixed(6)
+            ),
+            importPallets: Number(importStats.pallets.toFixed(6)),
+            documentPallets: Number(docStats.pallets.toFixed(6)),
+            remainingPallets: Number(
+              (importStats.pallets - docStats.pallets).toFixed(6)
+            ),
+          };
         }
+      );
 
-        const importStats =
-          normalizedArticle && importTotals.has(normalizedArticle)
-            ? importTotals.get(normalizedArticle)
-            : null;
-        const importQuantity = importStats?.boxes ?? null;
-        const importPallets = importStats?.pallets ?? null;
+      const unmatchedDocumentArticles = lines
+        .filter((line) => line.importQuantity === null)
+        .map((line) => line.article || line.normalizedArticle)
+        .filter(Boolean);
 
-        const boxesToCompare =
-          documentBoxes === null && conversionError
-            ? null
-            : documentBoxes ?? documentPieces;
+      let arrivalDateSqlValue;
+      try {
+        arrivalDateSqlValue = parseSqlDateOrFallback(
+          arrivalDate,
+          "Data e arritjes nuk është e vlefshme.",
+          importItems[0]?.PlannedArrivalDate || new Date()
+        );
+      } catch (dateError) {
+        return res.status(400).json({ message: dateError.message });
+      }
 
-        return {
-          index: line.RBr ?? index + 1,
-          article: line.Sifra_Art ?? null,
-          normalizedArticle,
-          description:
-            line.ImeMat ||
-            line.ImeArt ||
-            line.ImeArt2 ||
-            line.Alt_Ime ||
-            line.Alt_Ime2 ||
-            null,
-          documentPieces,
-          documentBoxes,
-          documentPallets,
-          importQuantity,
-          importPallets,
-          remainingQuantity:
-            importQuantity === null || boxesToCompare === null
-              ? null
-              : Number((importQuantity - boxesToCompare).toFixed(6)),
-          remainingPallets:
-            importPallets === null || documentPallets === null
-              ? null
-              : Number((importPallets - documentPallets).toFixed(6)),
-          conversionError,
-        };
-      })
-    );
+      const deliveredItems = [];
+      const remainingItems = [];
 
-    const summary = Array.from(importTotals.entries()).map(
-      ([articleCode, importStats]) => {
+      for (const [articleCode, importStats] of importTotals.entries()) {
         const docStats = documentTotals.get(articleCode) || {
           boxes: 0,
-          pallets: 0,
+        };
+        const deliveredBoxes = Math.min(importStats.boxes, docStats.boxes);
+        const remainingBoxes = Math.max(0, importStats.boxes - docStats.boxes);
+        const template = importStats.template || {};
+
+        const deliveredArrivalSql =
+          template.arrivalDateSql ||
+          originalArrivalDateSql ||
+          documentArrivalDateSql ||
+          arrivalDateSqlValue ||
+          todaySql;
+        const deliveredTemplate = {
+          ...template,
+          arrivalDateSql: deliveredArrivalSql,
         };
 
-        return {
+        const deliveredItem = buildSplitNormalizedItem({
+          template: deliveredTemplate,
           article: articleCode,
-          importQuantity: Number(importStats.boxes.toFixed(6)),
-          documentQuantity: Number(docStats.boxes.toFixed(6)),
-          remainingQuantity: Number(
-            (importStats.boxes - docStats.boxes).toFixed(6)
-          ),
-          importPallets: Number(importStats.pallets.toFixed(6)),
-          documentPallets: Number(docStats.pallets.toFixed(6)),
-          remainingPallets: Number(
-            (importStats.pallets - docStats.pallets).toFixed(6)
-          ),
+          boxCount: deliveredBoxes,
+          arrivalDateSql: deliveredArrivalSql,
+        });
+        if (deliveredItem) {
+          deliveredItems.push(deliveredItem);
+        }
+
+        const remainingTemplate = {
+          ...template,
+          requestDateSql: template.requestDateSql || todaySql,
+          arrivalDateSql: arrivalDateSqlValue,
+          comment: annotateSplitComment({
+            baseComment: template.comment,
+            documentNumber: brojDokValue,
+            role: "remaining",
+            relatedBatchId: normalizedBatchId,
+          }),
         };
-      }
-    );
 
-    const unmatchedDocumentArticles = lines
-      .filter((line) => line.importQuantity === null)
-      .map((line) => line.article || line.normalizedArticle)
-      .filter(Boolean);
-
-    let arrivalDateSqlValue;
-    try {
-      arrivalDateSqlValue = parseSqlDateOrFallback(
-        arrivalDate,
-        "Data e arritjes nuk është e vlefshme.",
-        importItems[0]?.PlannedArrivalDate || new Date()
-      );
-    } catch (dateError) {
-      return res.status(400).json({ message: dateError.message });
-    }
-
-    const deliveredItems = [];
-    const remainingItems = [];
-
-    for (const [articleCode, importStats] of importTotals.entries()) {
-      const docStats = documentTotals.get(articleCode) || {
-        boxes: 0,
-      };
-      const deliveredBoxes = Math.min(importStats.boxes, docStats.boxes);
-      const remainingBoxes = Math.max(0, importStats.boxes - docStats.boxes);
-      const template = importStats.template || {};
-
-      const deliveredArrivalSql =
-        template.arrivalDateSql ||
-        originalArrivalDateSql ||
-        documentArrivalDateSql ||
-        arrivalDateSqlValue ||
-        todaySql;
-      const deliveredTemplate = {
-        ...template,
-        arrivalDateSql: deliveredArrivalSql,
-      };
-
-      const deliveredItem = buildSplitNormalizedItem({
-        template: deliveredTemplate,
-        article: articleCode,
-        boxCount: deliveredBoxes,
-        arrivalDateSql: deliveredArrivalSql,
-      });
-      if (deliveredItem) {
-        deliveredItems.push(deliveredItem);
+        const remainingItem = buildSplitNormalizedItem({
+          template: remainingTemplate,
+          article: articleCode,
+          boxCount: remainingBoxes,
+          arrivalDateSql: arrivalDateSqlValue,
+        });
+        if (remainingItem) {
+          remainingItems.push(remainingItem);
+        }
       }
 
-      const remainingTemplate = {
-        ...template,
-        requestDateSql: template.requestDateSql || todaySql,
-        arrivalDateSql: arrivalDateSqlValue,
-        comment: annotateSplitComment({
-          baseComment: template.comment,
-          documentNumber: brojDokValue,
-          role: "remaining",
-          relatedBatchId: normalizedBatchId,
-        }),
-      };
-
-      const remainingItem = buildSplitNormalizedItem({
-        template: remainingTemplate,
-        article: articleCode,
-        boxCount: remainingBoxes,
-        arrivalDateSql: arrivalDateSqlValue,
-      });
-      if (remainingItem) {
-        remainingItems.push(remainingItem);
-      }
-    }
-
-    if (deliveredItems.length === 0) {
-      return res.status(400).json({
-        message:
-          "Dokumenti nuk përputhet me artikujt e importit. Nuk u gjet asgjë për t'u shënuar si e dorëzuar.",
-      });
-    }
-
-    const importerFallback =
-      trimString(importItems[0]?.Importer ?? importItems[0]?.Importuesi) ??
-      "Unknown importer";
-    const defaultCommentFallback =
-      sanitizeComment(importItems[0]?.Comment) ?? null;
-    const splitCommentFallback = annotateSplitComment({
-      baseComment: defaultCommentFallback,
-      documentNumber: brojDokValue,
-      role: "remaining",
-      relatedBatchId: normalizedBatchId,
-    });
-
-    const deliveredRequestDateFallback =
-      deliveredItems[0]?.requestDateSql ||
-      originalRequestDateSql ||
-      todaySql ||
-      arrivalDateSqlValue;
-    const deliveredArrivalDateFallback =
-      deliveredItems[0]?.arrivalDateSql ||
-      originalArrivalDateSql ||
-      documentArrivalDateSql ||
-      todaySql ||
-      arrivalDateSqlValue;
-
-    const remainingRequestDateFallback =
-      remainingItems[0]?.requestDateSql || todaySql || arrivalDateSqlValue;
-    const remainingArrivalDateFallback =
-      remainingItems[0]?.arrivalDateSql || arrivalDateSqlValue;
-
-    const transaction = new sql.Transaction(pool);
-    let newBatchId = null;
-    let deliveredRecords = [];
-    let remainingRecords = [];
-
-    try {
-      await transaction.begin();
-
-      await new sql.Request(transaction)
-        .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
-        .query(`DELETE FROM dbo.ImportRequests WHERE BatchId = @BatchId;`);
-
-      deliveredRecords = await insertImportRequestItems({
-        importer: deliveredItems[0]?.importer ?? importerFallback,
-        requestDateSqlValue: deliveredRequestDateFallback,
-        arrivalDateSqlValue: deliveredArrivalDateFallback,
-        normalizedItems: deliveredItems,
-        requesterUsername: req.user.username,
-        batchId: normalizedBatchId,
-        defaultComment: deliveredItems[0]?.comment ?? defaultCommentFallback,
-        transactionOverride: transaction,
-      });
-
-      if (remainingItems.length > 0) {
-        newBatchId = randomUUID();
-        remainingRecords = await insertImportRequestItems({
-          importer: remainingItems[0]?.importer ?? importerFallback,
-          requestDateSqlValue: remainingRequestDateFallback,
-          arrivalDateSqlValue: remainingArrivalDateFallback,
-          normalizedItems: remainingItems,
-          requesterUsername: req.user.username,
-          batchId: newBatchId,
-          defaultComment:
-            remainingItems[0]?.comment ??
-            splitCommentFallback ??
-            defaultCommentFallback,
-          transactionOverride: transaction,
+      if (deliveredItems.length === 0) {
+        return res.status(400).json({
+          message:
+            "Dokumenti nuk përputhet me artikujt e importit. Nuk u gjet asgjë për t'u shënuar si e dorëzuar.",
         });
       }
 
-      await transaction.commit();
-    } catch (splitError) {
+      const importerFallback =
+        trimString(importItems[0]?.Importer ?? importItems[0]?.Importuesi) ??
+        "Unknown importer";
+      const defaultCommentFallback =
+        sanitizeComment(importItems[0]?.Comment) ?? null;
+      const splitCommentFallback = annotateSplitComment({
+        baseComment: defaultCommentFallback,
+        documentNumber: brojDokValue,
+        role: "remaining",
+        relatedBatchId: normalizedBatchId,
+      });
+
+      const deliveredRequestDateFallback =
+        deliveredItems[0]?.requestDateSql ||
+        originalRequestDateSql ||
+        todaySql ||
+        arrivalDateSqlValue;
+      const deliveredArrivalDateFallback =
+        deliveredItems[0]?.arrivalDateSql ||
+        originalArrivalDateSql ||
+        documentArrivalDateSql ||
+        todaySql ||
+        arrivalDateSqlValue;
+
+      const remainingRequestDateFallback =
+        remainingItems[0]?.requestDateSql || todaySql || arrivalDateSqlValue;
+      const remainingArrivalDateFallback =
+        remainingItems[0]?.arrivalDateSql || arrivalDateSqlValue;
+
+      const transaction = new sql.Transaction(pool);
+      let newBatchId = null;
+      let deliveredRecords = [];
+      let remainingRecords = [];
+
       try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        console.error("Split rollback error:", rollbackError.message);
+        await transaction.begin();
+
+        await new sql.Request(transaction)
+          .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
+          .query(`DELETE FROM dbo.ImportRequests WHERE BatchId = @BatchId;`);
+
+        deliveredRecords = await insertImportRequestItems({
+          importer: deliveredItems[0]?.importer ?? importerFallback,
+          requestDateSqlValue: deliveredRequestDateFallback,
+          arrivalDateSqlValue: deliveredArrivalDateFallback,
+          normalizedItems: deliveredItems,
+          requesterUsername: req.user.username,
+          batchId: normalizedBatchId,
+          defaultComment: deliveredItems[0]?.comment ?? defaultCommentFallback,
+          transactionOverride: transaction,
+        });
+
+        if (remainingItems.length > 0) {
+          newBatchId = randomUUID();
+          remainingRecords = await insertImportRequestItems({
+            importer: remainingItems[0]?.importer ?? importerFallback,
+            requestDateSqlValue: remainingRequestDateFallback,
+            arrivalDateSqlValue: remainingArrivalDateFallback,
+            normalizedItems: remainingItems,
+            requesterUsername: req.user.username,
+            batchId: newBatchId,
+            defaultComment:
+              remainingItems[0]?.comment ??
+              splitCommentFallback ??
+              defaultCommentFallback,
+            transactionOverride: transaction,
+          });
+        }
+
+        await transaction.commit();
+      } catch (splitError) {
+        try {
+          await transaction.rollback();
+        } catch (rollbackError) {
+          console.error("Split rollback error:", rollbackError.message);
+        }
+        throw splitError;
       }
-      throw splitError;
-    }
 
-    const actualArrivalDateSql =
-      documentArrivalDateSql ||
-      deliveredRecords[0]?.ActualArrivalDate ||
-      deliveredArrivalDateFallback ||
-      originalArrivalDateSql ||
-      todaySql;
+      const actualArrivalDateSql =
+        documentArrivalDateSql ||
+        deliveredRecords[0]?.ActualArrivalDate ||
+        deliveredArrivalDateFallback ||
+        originalArrivalDateSql ||
+        todaySql;
 
-    await pool
-      .request()
-      .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
-      .input("ActualArrivalDate", sql.Date, actualArrivalDateSql)
-      .input("ConfirmedBy", sql.NVarChar(128), req.user.username)
-      .query(`UPDATE dbo.ImportRequests
+      await pool
+        .request()
+        .input("BatchId", sql.UniqueIdentifier, normalizedBatchId)
+        .input("ActualArrivalDate", sql.Date, actualArrivalDateSql)
+        .input("ConfirmedBy", sql.NVarChar(128), req.user.username)
+        .query(`UPDATE dbo.ImportRequests
               SET Status = 'approved',
                   ConfirmedBy = COALESCE(ConfirmedBy, @ConfirmedBy),
                   ActualArrivalDate = @ActualArrivalDate,
                   LastApprovedArrivalDate = DataArritjes
               WHERE BatchId = @BatchId`);
 
-    if (newBatchId) {
-      await pool
-        .request()
-        .input("BatchId", sql.UniqueIdentifier, newBatchId)
-        .input("ArrivalDate", sql.Date, arrivalDateSqlValue)
-        .query(`UPDATE dbo.ImportRequests
+      if (newBatchId) {
+        await pool
+          .request()
+          .input("BatchId", sql.UniqueIdentifier, newBatchId)
+          .input("ArrivalDate", sql.Date, arrivalDateSqlValue)
+          .query(`UPDATE dbo.ImportRequests
                 SET Status = 'pending',
                     ConfirmedBy = NULL,
                     ActualArrivalDate = NULL,
                     DataArritjes = @ArrivalDate
                 WHERE BatchId = @BatchId`);
-    }
+      }
 
-    const basePayload = {
-      summary,
-      lines,
-      unmatchedDocumentArticles,
-      generatedAt: new Date().toISOString(),
-    };
+      const basePayload = {
+        summary,
+        lines,
+        unmatchedDocumentArticles,
+        generatedAt: new Date().toISOString(),
+      };
 
-    const deliveredPayload = {
-      ...basePayload,
-      split: {
-        role: "delivered",
-        relatedBatchId: newBatchId || null,
-        documentNumber: brojDokValue,
-      },
-    };
-
-    await storeBatchDocumentSnapshot({
-      pool,
-      batchId: normalizedBatchId,
-      documentNumber: brojDokValue,
-      payload: deliveredPayload,
-      arrivalDate: documentArrivalDateSql || arrivalDateSqlValue,
-      username: req.user.username,
-    });
-
-    let remainingPayload = null;
-
-    if (newBatchId) {
-      remainingPayload = {
+      const deliveredPayload = {
         ...basePayload,
         split: {
-          role: "remaining",
-          relatedBatchId: normalizedBatchId,
+          role: "delivered",
+          relatedBatchId: newBatchId || null,
           documentNumber: brojDokValue,
         },
       };
 
       await storeBatchDocumentSnapshot({
         pool,
-        batchId: newBatchId,
+        batchId: normalizedBatchId,
         documentNumber: brojDokValue,
-        payload: remainingPayload,
-        arrivalDate: arrivalDateSqlValue,
+        payload: deliveredPayload,
+        arrivalDate: documentArrivalDateSql || arrivalDateSqlValue,
         username: req.user.username,
       });
-    }
+
+      let remainingPayload = null;
+
+      if (newBatchId) {
+        remainingPayload = {
+          ...basePayload,
+          split: {
+            role: "remaining",
+            relatedBatchId: normalizedBatchId,
+            documentNumber: brojDokValue,
+          },
+        };
+
+        await storeBatchDocumentSnapshot({
+          pool,
+          batchId: newBatchId,
+          documentNumber: brojDokValue,
+          payload: remainingPayload,
+          arrivalDate: arrivalDateSqlValue,
+          username: req.user.username,
+        });
+      }
 
       await recordRequestLog({
         pool,
@@ -4294,39 +4270,40 @@ router.post(
         });
       }
 
-    if (newBatchId && remainingRecords.length > 0) {
-      await notifyRequestCreation({
-        pool,
-        records: remainingRecords,
-        initiatorUsername: req.user.username,
+      if (newBatchId && remainingRecords.length > 0) {
+        await notifyRequestCreation({
+          pool,
+          records: remainingRecords,
+          initiatorUsername: req.user.username,
+        });
+      }
+
+      res.json({
+        batchId: normalizedBatchId,
+        newBatchId,
+        document: {
+          sifraOe: Number(sifraOe) || null,
+          sifraDok: Number(sifraDok) || null,
+          brojDok: brojDokValue,
+          arrivalDate: arrivalDateSqlValue,
+          sifraPrim: sifraPrim || null,
+          imaDodatna: imaDodatna || null,
+          podrediOpc: podrediOpc || null,
+        },
+        lines,
+        summary,
+        unmatchedDocumentArticles,
+        requestsReset: true,
+        arrivalDate: arrivalDateSqlValue,
+      });
+    } catch (error) {
+      console.error("Separate bill lookup error:", error);
+      res.status(500).json({
+        message:
+          "Nuk mundëm të marrim artikujt e dokumentit. Ju lutemi provoni përsëri.",
       });
     }
-
-    res.json({
-      batchId: normalizedBatchId,
-      newBatchId,
-      document: {
-        sifraOe: Number(sifraOe) || null,
-        sifraDok: Number(sifraDok) || null,
-        brojDok: brojDokValue,
-        arrivalDate: arrivalDateSqlValue,
-        sifraPrim: sifraPrim || null,
-        imaDodatna: imaDodatna || null,
-        podrediOpc: podrediOpc || null,
-      },
-      lines,
-      summary,
-      unmatchedDocumentArticles,
-      requestsReset: true,
-      arrivalDate: arrivalDateSqlValue,
-    });
-  } catch (error) {
-    console.error("Separate bill lookup error:", error);
-    res.status(500).json({
-      message:
-        "Nuk mundëm të marrim artikujt e dokumentit. Ju lutemi provoni përsëri.",
-    });
   }
-});
+);
 
 export default router;

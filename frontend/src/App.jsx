@@ -10,6 +10,7 @@ import RequesterDashboard from "./pages/RequesterDashboard";
 import ConfirmerDashboard from "./pages/ConfirmerDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import RequesterHistory from "./pages/RequesterHistory";
+import Help from "./pages/Help";
 
 export default function App() {
   const token = localStorage.getItem("token");
@@ -18,6 +19,7 @@ export default function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/help" element={<Help />} />
         {!token && (
           <>
             <Route path="/" element={<Login />} />

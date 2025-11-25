@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -29,6 +30,7 @@ import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
+import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
@@ -733,6 +735,15 @@ export default function AdminDashboard() {
         title="Admin workspace"
         subtitle="Track approved import requests, anticipate arrivals and curate role-based access for every collaborator."
         actions={[
+          <Button
+            key="help"
+            variant="text"
+            component={RouterLink}
+            to="/help"
+            startIcon={<HelpOutlineRoundedIcon />}
+          >
+            Help
+          </Button>,
           <NotificationMenu
             key="notifications"
             onUnreadChange={setUnreadNotifications}
