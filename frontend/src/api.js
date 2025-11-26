@@ -1,29 +1,43 @@
 import axios from "axios";
 
-const resolveBaseURL = () => {
-  let envUrl = null;
-  if (
-    typeof import.meta !== "undefined" &&
-    import.meta.env &&
-    typeof import.meta.env.VITE_API_URL === "string"
-  ) {
-    envUrl = import.meta.env.VITE_API_URL.trim();
+const normalizeUrl = (value) => {
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const withoutTrailingSlash = trimmed.replace(/\/+$/, "");
+  if (withoutTrailingSlash.endsWith("/api")) {
+    return withoutTrailingSlash;
   }
-  if (envUrl) {
-    return envUrl;
+  return `${withoutTrailingSlash}/api`;
+};
+
+const resolveBaseURL = () => {
+  const env =
+    (typeof import.meta !== "undefined" && import.meta.env) || undefined;
+
+  const envCandidates = [
+    env?.VITE_API_URL,
+    env?.VITE_API_BASE_URL,
+    env?.VITE_BACKEND_URL,
+  ]
+    .filter(Boolean)
+    .map((v) => normalizeUrl(v))
+    .filter(Boolean);
+
+  if (envCandidates.length > 0) {
+    return envCandidates[0];
   }
 
+  // Default to the LAN backend if nothing is configured.
   if (typeof window === "undefined") {
     return "http://192.168.100.35:5000/api";
   }
 
   const hostname = window.location.hostname || "localhost";
   const protocol = window.location.protocol || "http:";
-  const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
-  const targetHost = isLocal ? "localhost" : hostname;
   const port = "5000";
 
-  return `${protocol}//${targetHost}:${port}/api`;
+  return `${protocol}//${hostname}:${port}/api`;
 };
 
 const API = axios.create({

@@ -2476,6 +2476,146 @@ router.get("/mine", verifyRole(["requester"]), async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// ---------- GET ALL REQUESTS (History, all roles) ----------
+router.get(
+  "/history",
+  verifyRole(["admin", "confirmer", "requester"]),
+  async (req, res) => {
+    try {
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const pageSizeRaw = Number(req.query.pageSize) || 25;
+      const pageSize = Math.min(Math.max(pageSizeRaw, 5), 200);
+      const offset = (page - 1) * pageSize;
+
+      const sortByParam = trimString(req.query.sortBy)?.toLowerCase();
+      const sortDir =
+        trimString(req.query.sortDir)?.toLowerCase() === "asc"
+          ? "ASC"
+          : "DESC";
+      const sortColumn = (() => {
+        switch (sortByParam) {
+          case "requestdate":
+            return "DataKerkeses";
+          case "arrivaldate":
+          case "plannedarrivaldate":
+            return "DataArritjes";
+          case "actualarrivaldate":
+          case "actualarrival":
+            return "ActualArrivalDate";
+          case "status":
+            return "Status";
+          default:
+            return "CreatedAt";
+        }
+      })();
+
+      const keyword = trimString(req.query.q);
+      const articleSearch =
+        normalizeArticleCode(req.query.article) ||
+        normalizeArticleCode(keyword) ||
+        null;
+      const fromDate = toSqlDateString(req.query.from);
+      const toDate = toSqlDateString(req.query.to);
+      const statusFilter = trimString(req.query.status)?.toLowerCase();
+
+      const { hasBatchId } = await getImportRequestFeatureState();
+      const batchProjection = hasBatchId
+        ? ", BatchId"
+        : ", CAST(NULL AS UNIQUEIDENTIFIER) AS BatchId";
+
+      const whereClauses = [];
+      const pool = await poolPromise;
+      const request = pool.request();
+
+      if (fromDate) {
+        request.input("FromDate", sql.Date, fromDate);
+        whereClauses.push("DataKerkeses >= @FromDate");
+      }
+      if (toDate) {
+        request.input("ToDate", sql.Date, toDate);
+        whereClauses.push("DataKerkeses <= @ToDate");
+      }
+      if (statusFilter && statusFilter !== "all") {
+        request.input("Status", sql.NVarChar(50), statusFilter);
+        whereClauses.push("LOWER(Status) = @Status");
+      }
+      if (keyword) {
+        const wildcard = `%${keyword}%`;
+        request.input("Keyword", sql.NVarChar(256), wildcard);
+        const batchField = hasBatchId
+          ? " OR CAST(BatchId AS NVARCHAR(36)) LIKE @Keyword"
+          : "";
+        whereClauses.push(
+          `(Importuesi LIKE @Keyword OR Useri LIKE @Keyword OR Comment LIKE @Keyword OR ArticleName LIKE @Keyword OR Artikulli LIKE @Keyword${batchField})`
+        );
+      }
+      if (articleSearch) {
+        request.input("ArticleSearch", sql.NVarChar(50), articleSearch);
+        whereClauses.push("(Artikulli = @ArticleSearch)");
+      }
+
+      request.input("Offset", sql.Int, offset);
+      request.input("PageSize", sql.Int, pageSize);
+
+      const whereSql =
+        whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+      const query = `SELECT ID,
+                     DataKerkeses AS RequestDate,
+                     DataArritjes AS PlannedArrivalDate,
+                     ActualArrivalDate,
+                     Importuesi AS Importer,
+                     Artikulli AS Article,
+                     ArticleName,
+                     NumriPakove AS BoxCount,
+                     NumriPaletave AS PalletCount,
+                     BoxesPerPallet,
+                     BoxesPerLayer,
+                     LayersPerPallet,
+                     FullPallets,
+                     RemainingBoxes,
+                     PalletWeightKg,
+                     PalletVolumeM3,
+                     BoxWeightKg,
+                     BoxVolumeM3,
+                     PalletVolumeUtilization,
+                     WeightFullPalletsKg,
+                     VolumeFullPalletsM3,
+                     WeightRemainingKg,
+                     VolumeRemainingM3,
+                     TotalShipmentWeightKg,
+                     TotalShipmentVolumeM3,
+                     Comment,
+                     Useri AS Requester,
+                     Status,
+                     ConfirmedBy,
+                     CreatedAt${batchProjection}
+              FROM ImportRequests
+              ${whereSql}
+              ORDER BY ${sortColumn} ${sortDir}, ID DESC
+              OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+              SELECT COUNT(1) AS TotalCount FROM ImportRequests ${whereSql};`;
+
+      const result = await request.query(query);
+      const items = result?.recordsets?.[0] || result?.recordset || [];
+      const total = Number(result?.recordsets?.[1]?.[0]?.TotalCount) || 0;
+
+      const batchDocuments = hasBatchId
+        ? await fetchBatchDocumentMap(pool)
+        : null;
+      res.json({
+        items: mapArticles(items, batchDocuments),
+        total,
+        page,
+        pageSize,
+      });
+    } catch (err) {
+      console.error("Fetch history imports error:", err.message);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 // ---------- GET PENDING REQUESTS (Confirmer) ----------
 router.get(
   "/",
