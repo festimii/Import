@@ -22,6 +22,38 @@ const normalizeUsername = (value) => {
   return value.trim();
 };
 
+const fetchBatchIdForRequest = async (pool, requestId) => {
+  if (!pool || !requestId) return null;
+
+  try {
+    const result = await pool
+      .request()
+      .input("RequestID", requestId)
+      .query(
+        `SELECT BatchId
+         FROM ImportRequests
+         WHERE ID = @RequestID`
+      );
+
+    return result.recordset?.[0]?.BatchId || null;
+  } catch (error) {
+    console.error(
+      "Notification batch lookup error:",
+      error?.message || error
+    );
+    return null;
+  }
+};
+
+const resolveBatchScope = async (pool, explicitBatchId, requestId) => {
+  if (explicitBatchId) {
+    return { batchId: explicitBatchId, hasBatchScope: true };
+  }
+
+  const derived = await fetchBatchIdForRequest(pool, requestId);
+  return { batchId: derived, hasBatchScope: Boolean(derived) };
+};
+
 const uniqueStrings = (values = []) => {
   const set = new Set();
 
@@ -104,7 +136,7 @@ const trimMessage = (message) => {
 
 export const createNotifications = async (
   pool,
-  { requestId, message, type = "info", usernames, excludeUsername }
+  { requestId, batchId: explicitBatchId, message, type = "info", usernames, excludeUsername }
 ) => {
   const safeMessage = trimMessage(message);
 
@@ -112,17 +144,28 @@ export const createNotifications = async (
     return [];
   }
 
+  const { batchId, hasBatchScope } = await resolveBatchScope(
+    pool,
+    explicitBatchId,
+    requestId
+  );
+
   if (Array.isArray(usernames) && usernames.length > 0) {
     const uniqueUsernames = uniqueStrings(usernames);
     if (uniqueUsernames.length === 0) {
       return [];
     }
 
-    // Skip if the same notification already exists for a user (same request, type, and message)
+    // Skip if the same notification already exists for a user (same request/batch, type, and message)
     const lookup = pool.request();
-    lookup.input("RequestID", requestId);
     lookup.input("Message", safeMessage);
     lookup.input("Type", type);
+
+    if (hasBatchScope) {
+      lookup.input("BatchId", batchId);
+    } else {
+      lookup.input("RequestID", requestId);
+    }
 
     const usernameParams = uniqueUsernames.map((username, index) => {
       const param = `Username${index}`;
@@ -131,12 +174,13 @@ export const createNotifications = async (
     });
 
     const existingResult = await lookup.query(
-      `SELECT Username
-       FROM RequestNotifications
-       WHERE RequestID = @RequestID
-         AND Type = @Type
-         AND Message = @Message
-         AND Username IN (${usernameParams.join(", ")})`
+      `SELECT rn.Username
+       FROM RequestNotifications rn
+       ${hasBatchScope ? "INNER JOIN ImportRequests ir ON rn.RequestID = ir.ID" : ""}
+       WHERE ${hasBatchScope ? "ir.BatchId = @BatchId" : "rn.RequestID = @RequestID"}
+         AND rn.Type = @Type
+         AND rn.Message = @Message
+         AND rn.Username IN (${usernameParams.join(", ")})`
     );
 
     const alreadyNotified = new Set(
@@ -181,6 +225,7 @@ export const createNotifications = async (
     .input("RequestID", requestId)
     .input("Message", safeMessage)
     .input("Type", type)
+    .input("BatchId", hasBatchScope ? batchId : null)
     .input("ExcludeUsername", excludeUsername || null)
     .query(`INSERT INTO RequestNotifications (RequestID, Username, Message, Type)
             SELECT @RequestID, Username, @Message, @Type
@@ -189,7 +234,8 @@ export const createNotifications = async (
               AND NOT EXISTS (
                 SELECT 1
                 FROM RequestNotifications rn
-                WHERE rn.RequestID = @RequestID
+                ${hasBatchScope ? "INNER JOIN ImportRequests ir ON rn.RequestID = ir.ID" : ""}
+                WHERE ${hasBatchScope ? "ir.BatchId = @BatchId" : "rn.RequestID = @RequestID"}
                   AND rn.Type = @Type
                   AND rn.Message = @Message
                   AND rn.Username = Users.Username
@@ -205,6 +251,7 @@ export const dispatchNotificationEvent = async (
   pool,
   {
     requestId,
+    batchId,
     message,
     type = "info",
     usernames,
@@ -263,11 +310,15 @@ export const dispatchNotificationEvent = async (
     notificationPayload.excludeUsername = excluded;
   }
 
+  if (batchId) {
+    notificationPayload.batchId = batchId;
+  }
+
   const created = await createNotifications(pool, notificationPayload);
 
   let pushResults;
 
-  if (push && typeof push === "object") {
+  if (push && typeof push === "object" && Array.isArray(created) && created.length > 0) {
     const payload = {
       title: push.title || "Import Tracker",
       body: push.body || stringMessage,

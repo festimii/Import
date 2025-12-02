@@ -30,7 +30,7 @@ const resolveBaseURL = () => {
 
   // Default to the LAN backend if nothing is configured.
   if (typeof window === "undefined") {
-    return "http://192.168.100.35:5000/api";
+    return "http://localhost:5000/api";
   }
 
   const hostname = window.location.hostname || "localhost";

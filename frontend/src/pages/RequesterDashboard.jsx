@@ -29,6 +29,7 @@ import { alpha } from "@mui/material/styles";
 import AddCircleRoundedIcon from "@mui/icons-material/AddCircleRounded";
 import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import EventRepeatRoundedIcon from "@mui/icons-material/EventRepeatRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
@@ -201,6 +202,7 @@ const NON_PENDING_STATUSES = new Set([
   "completed",
   "cancelled",
   "archived",
+  "confirmed",
 ]);
 
 const isPendingStatus = (status) => {
@@ -405,7 +407,20 @@ const PendingRequestsDialog = ({
   lastSyncedLabel,
   onRefresh,
   feedback,
+  onEditGroup,
+  onDeleteGroup,
+  editingBatchId,
+  deletingBatchId,
 }) => {
+  const isSameBatch = (first, second) => {
+    const normalizedFirst = sanitizeGuid(first);
+    const normalizedSecond = sanitizeGuid(second);
+    if (!normalizedFirst || !normalizedSecond) {
+      return false;
+    }
+    return normalizedFirst.toLowerCase() === normalizedSecond.toLowerCase();
+  };
+
   const totalArticles = useMemo(
     () =>
       groups.reduce(
@@ -449,6 +464,16 @@ const PendingRequestsDialog = ({
           const createdLabel = group.createdAt
             ? formatDateLabel(group.createdAt)
             : null;
+          const normalizedBatchId = sanitizeGuid(group.batchId);
+          const canModify = Boolean(group.isPending && normalizedBatchId);
+          const editingMatch =
+            canModify && editingBatchId
+              ? isSameBatch(editingBatchId, normalizedBatchId)
+              : false;
+          const deletingMatch =
+            canModify && deletingBatchId
+              ? isSameBatch(deletingBatchId, normalizedBatchId)
+              : false;
 
           return (
             <Box key={group.key}>
@@ -498,6 +523,54 @@ const PendingRequestsDialog = ({
                   </Typography>
                 )}
               </Stack>
+              {canModify ? (
+                <Stack spacing={0.5} sx={{ mt: 1 }}>
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={1}
+                    useFlexGap
+                    flexWrap="wrap"
+                    alignItems={{ sm: "center" }}
+                  >
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<EditRoundedIcon />}
+                      onClick={() => onEditGroup?.(group)}
+                      disabled={
+                        !onEditGroup || loading || deletingMatch || editingMatch
+                      }
+                    >
+                      {editingMatch ? "Duke u modifikuar..." : "Ndrysho"}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      startIcon={<DeleteOutlineRoundedIcon />}
+                      onClick={() => onDeleteGroup?.(group)}
+                      disabled={
+                        !onDeleteGroup || loading || deletingMatch || editingMatch
+                      }
+                    >
+                      {deletingMatch ? "Duke fshirë..." : "Fshij"}
+                    </Button>
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">
+                    Porositë në pritje mund të ndryshohen ose fshihen derisa të
+                    konfirmohen.
+                  </Typography>
+                </Stack>
+              ) : (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mt: 1 }}
+                >
+                  Ky import është konfirmuar; përdorni logjikën e konfirmimit
+                  për ndryshime.
+                </Typography>
+              )}
             </Box>
           );
         })}
@@ -670,6 +743,23 @@ export default function RequesterDashboard() {
   };
 
   const handleStartEditGroup = (group) => {
+    if (!group) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message: "Kjo porosi nuk u gjet.",
+      });
+      return;
+    }
+
+    if (!group.isPending) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message:
+          "Ky import është konfirmuar. Ndryshimet pas konfirmimit bëhen përmes logjikës së konfirmimit.",
+      });
+      return;
+    }
+
     if (!group?.batchId) {
       setSubmittedFeedback({
         severity: "warning",
@@ -718,6 +808,23 @@ export default function RequesterDashboard() {
   };
 
   const handleDeleteGroup = async (group) => {
+    if (!group) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message: "Kjo porosi nuk u gjet.",
+      });
+      return;
+    }
+
+    if (!group.isPending) {
+      setSubmittedFeedback({
+        severity: "warning",
+        message:
+          "Porositë e konfirmuara nuk mund të fshihen këtu. Përdorni logjikën e konfirmimit për ndryshime.",
+      });
+      return;
+    }
+
     const sanitizedBatchId = sanitizeGuid(group?.batchId);
     if (!sanitizedBatchId) {
       setSubmittedFeedback({
@@ -742,6 +849,7 @@ export default function RequesterDashboard() {
         message: "Porosia u fshi me sukses.",
       });
       await loadSubmittedRequests();
+      await loadSharedPendingRequests();
       if (
         editingSubmission?.batchId &&
         sanitizeGuid(editingSubmission.batchId)?.toLowerCase() ===
@@ -1181,6 +1289,15 @@ export default function RequesterDashboard() {
       return;
     }
     handleDeleteGroup(match);
+  };
+
+  const handlePendingDialogEdit = (group) => {
+    handleStartEditGroup(group);
+    setPendingDialogOpen(false);
+  };
+
+  const handlePendingDialogDelete = (group) => {
+    handleDeleteGroup(group);
   };
 
   const pendingSummary = useMemo(
@@ -1783,6 +1900,10 @@ export default function RequesterDashboard() {
         lastSyncedLabel={pendingLastSyncedLabel}
         onRefresh={handleRefreshPending}
         feedback={sharedPendingFeedback}
+        onEditGroup={handlePendingDialogEdit}
+        onDeleteGroup={handlePendingDialogDelete}
+        editingBatchId={editingSubmission?.batchId ?? null}
+        deletingBatchId={deletingBatchId}
       />
       <Dialog
         open={Boolean(editingGroup)}

@@ -235,6 +235,26 @@ const describeStatusInAlbanian = (status) => {
   }
 };
 
+const NON_EDITABLE_STATUSES = new Set([
+  "approved",
+  "rejected",
+  "completed",
+  "cancelled",
+  "archived",
+  "confirmed",
+]);
+
+const isEditableBeforeConfirmation = (status, confirmedBy) => {
+  const normalized = trimString(status)?.toLowerCase() || "";
+  if (NON_EDITABLE_STATUSES.has(normalized)) {
+    return false;
+  }
+  if (trimString(confirmedBy)) {
+    return false;
+  }
+  return true;
+};
+
 const GUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -1963,6 +1983,7 @@ const notifyRequestCreation = async ({ pool, records, initiatorUsername }) => {
   try {
     await dispatchNotificationEvent(pool, {
       requestId: primaryRecord.ID,
+      batchId: primaryRecord.BatchId,
       message,
       type: "request_created",
       roles: newRequestRoles,
@@ -3313,6 +3334,7 @@ router.patch(
       try {
         await dispatchNotificationEvent(pool, {
           requestId: record.ID,
+          batchId: updatedBatchId || record.BatchId,
           message: updateMessage,
           type: "requester_arrival_update",
           roles: ["admin", "confirmer", "requester"],
@@ -3661,6 +3683,7 @@ router.patch("/:id", verifyRole(["confirmer"]), async (req, res) => {
 
         await dispatchNotificationEvent(pool, {
           requestId: record.ID,
+          batchId: record.BatchId,
           message: notification.message,
           type: notification.type,
           usernames: notification.usernames || requesterAudience,
@@ -3723,15 +3746,33 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
   const existingResult = await pool
     .request()
     .input("BatchId", sql.UniqueIdentifier, batchId)
-    .query(`SELECT TOP 1 Useri AS Requester,
+    .query(`SELECT Useri AS Requester,
                     DataKerkeses AS RequestDate,
-                    DataArritjes AS PlannedArrivalDate
+                    DataArritjes AS PlannedArrivalDate,
+                    Status,
+                    ConfirmedBy
             FROM dbo.ImportRequests
             WHERE BatchId = @BatchId`);
 
-  if (existingResult.recordset.length === 0) {
+  const existingRecords = existingResult.recordset;
+
+  if (existingRecords.length === 0) {
     return res.status(404).json({ message: "Porosia nuk u gjet." });
   }
+
+  const hasConfirmedRows = existingRecords.some(
+    (record) =>
+      !isEditableBeforeConfirmation(record.Status, record.ConfirmedBy)
+  );
+
+  if (hasConfirmedRows) {
+    return res.status(409).json({
+      message:
+        "Porosia është konfirmuar ose mbyllur. Ndryshimet pas konfirmimit bëhen nga procesi i konfirmimit.",
+    });
+  }
+
+  const baseRecord = existingRecords[0];
 
   let requestDateSqlValue;
   let arrivalDateSqlValue;
@@ -3739,12 +3780,12 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
     requestDateSqlValue = parseSqlDateOrFallback(
       requestDate,
       "Data e kërkesës nuk është e vlefshme.",
-      existingResult.recordset[0].RequestDate
+      baseRecord.RequestDate
     );
     arrivalDateSqlValue = parseSqlDateOrFallback(
       arrivalDate,
       "Data e arritjes nuk është e vlefshme.",
-      existingResult.recordset[0].PlannedArrivalDate
+      baseRecord.PlannedArrivalDate
     );
   } catch (dateError) {
     return res.status(400).json({ message: dateError.message });
@@ -3806,13 +3847,14 @@ router.put("/batch/:batchId", verifyRole(["requester"]), async (req, res) => {
       record: primaryRecord,
       actor: req.user.username,
       metadata: {
-        previousDate: existingResult.recordset[0].PlannedArrivalDate,
+        previousDate: baseRecord.PlannedArrivalDate,
         nextDate: arrivalDateSqlValue,
       },
     });
 
     await dispatchNotificationEvent(pool, {
       requestId: primaryRecord.ID,
+      batchId: primaryRecord.BatchId,
       message: copy.message,
       type: "request_updated",
       roles: ["admin", "confirmer", "requester"],
@@ -3846,6 +3888,7 @@ router.delete(
         `SELECT ID,
                 Useri AS Requester,
                 Status,
+                ConfirmedBy,
                 Importuesi AS Importer,
                 Comment,
                 DataKerkeses AS RequestDate,
@@ -3856,6 +3899,18 @@ router.delete(
 
     if (existingRecordsResult.recordset.length === 0) {
       return res.status(404).json({ message: "Porosia nuk u gjet." });
+    }
+
+    const hasConfirmedRows = existingRecordsResult.recordset.some(
+      (record) =>
+        !isEditableBeforeConfirmation(record.Status, record.ConfirmedBy)
+    );
+
+    if (hasConfirmedRows) {
+      return res.status(409).json({
+        message:
+          "Porosia është konfirmuar dhe nuk mund të fshihet nga ky ekran.",
+      });
     }
 
     const transaction = new sql.Transaction(pool);
@@ -3899,6 +3954,7 @@ router.delete(
     try {
       await dispatchNotificationEvent(pool, {
         requestId: referenceRecord.ID,
+        batchId: referenceRecord.BatchId,
         message: copy.message,
         type: "request_deleted",
         roles: ["admin", "confirmer", "requester"],
