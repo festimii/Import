@@ -758,6 +758,15 @@ export default function AdminDashboard() {
             Manage users
           </Button>,
           <Button
+            key="change-password"
+            variant="outlined"
+            color="inherit"
+            component={RouterLink}
+            to="/change-password"
+          >
+            Change password
+          </Button>,
+          <Button
             key="logout"
             variant="contained"
             color="secondary"

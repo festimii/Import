@@ -2,7 +2,12 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { poolPromise } from "../db.js";
-import { verifyRole } from "../middleware/auth.js";
+import { verifyAuth, verifyRole } from "../middleware/auth.js";
+import {
+  clearResetToken,
+  createResetToken,
+  verifyResetToken,
+} from "../services/passwordResetStore.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -109,6 +114,149 @@ router.patch("/users/:username", verifyRole(["admin"]), async (req, res) => {
     res.json(refreshed.recordset[0]);
   } catch (err) {
     console.error("Update role error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---------- CHANGE PASSWORD (Authenticated users) ----------
+router.post("/change-password", verifyAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res
+      .status(400)
+      .json({ message: "Current and new passwords are required." });
+  }
+
+  if (newPassword.length < 8) {
+    return res
+      .status(400)
+      .json({ message: "New password must be at least 8 characters long." });
+  }
+
+  try {
+    const pool = await poolPromise;
+    const userResult = await pool
+      .request()
+      .input("Username", req.user.username)
+      .query("SELECT PasswordHash FROM Users WHERE Username = @Username");
+
+    if (userResult.recordset.length === 0) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const user = userResult.recordset[0];
+    const matches = await bcrypt.compare(currentPassword, user.PasswordHash);
+    if (!matches) {
+      return res.status(400).json({ message: "Current password is incorrect." });
+    }
+
+    const samePassword = await bcrypt.compare(newPassword, user.PasswordHash);
+    if (samePassword) {
+      return res
+        .status(400)
+        .json({ message: "Please choose a password you haven't used." });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool
+      .request()
+      .input("PasswordHash", hash)
+      .input("Username", req.user.username)
+      .query("UPDATE Users SET PasswordHash = @PasswordHash WHERE Username = @Username");
+
+    res.json({ message: "Password updated successfully." });
+  } catch (err) {
+    console.error("Change password error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---------- FORGOT / RESET PASSWORD ----------
+router.post("/forgot-password", async (req, res) => {
+  const { username } = req.body;
+  if (!username) {
+    return res.status(400).json({ message: "Username is required." });
+  }
+
+  try {
+    const pool = await poolPromise;
+    const result = await pool
+      .request()
+      .input("Username", username)
+      .query("SELECT Username FROM Users WHERE Username = @Username");
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ message: "We couldn't find that user." });
+    }
+
+    const code = createResetToken(username);
+    console.log(`Password reset code for ${username}: ${code}`);
+
+    res.json({
+      message:
+        "We generated a reset code. Enter it with your new password to finish resetting.",
+      resetCode: code, // surfaced for now because email delivery is not configured
+      expiresInMinutes: 10,
+    });
+  } catch (err) {
+    console.error("Forgot password error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/reset-password", async (req, res) => {
+  const { username, code, newPassword } = req.body;
+  if (!username || !code || !newPassword) {
+    return res.status(400).json({
+      message: "Username, reset code and new password are required.",
+    });
+  }
+
+  if (newPassword.length < 8) {
+    return res
+      .status(400)
+      .json({ message: "New password must be at least 8 characters long." });
+  }
+
+  try {
+    const pool = await poolPromise;
+    const result = await pool
+      .request()
+      .input("Username", username)
+      .query("SELECT PasswordHash FROM Users WHERE Username = @Username");
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ message: "We couldn't find that user." });
+    }
+
+    const isValid = verifyResetToken(username, code);
+    if (!isValid) {
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired reset code." });
+    }
+
+    const existing = result.recordset[0];
+    const samePassword = await bcrypt.compare(newPassword, existing.PasswordHash);
+    if (samePassword) {
+      return res
+        .status(400)
+        .json({ message: "Please choose a password you haven't used." });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool
+      .request()
+      .input("PasswordHash", hash)
+      .input("Username", username)
+      .query("UPDATE Users SET PasswordHash = @PasswordHash WHERE Username = @Username");
+
+    clearResetToken(username);
+
+    res.json({ message: "Password reset successfully." });
+  } catch (err) {
+    console.error("Reset password error:", err.message);
     res.status(500).json({ message: "Server error" });
   }
 });

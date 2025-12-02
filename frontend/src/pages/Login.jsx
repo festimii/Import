@@ -54,7 +54,7 @@ export default function Login() {
           <Link component={RouterLink} to="/register" underline="hover">
             Create a new account
           </Link>
-          <Link underline="hover" color="text.secondary" sx={{ cursor: "pointer" }}>
+          <Link component={RouterLink} to="/forgot-password" underline="hover" color="text.secondary">
             Forgot your password?
           </Link>
         </Stack>

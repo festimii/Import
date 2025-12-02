@@ -11,6 +11,8 @@ import ConfirmerDashboard from "./pages/ConfirmerDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import RequesterHistory from "./pages/RequesterHistory";
 import Help from "./pages/Help";
+import ForgotPassword from "./pages/ForgotPassword";
+import ChangePassword from "./pages/ChangePassword";
 
 export default function App() {
   const token = localStorage.getItem("token");
@@ -20,6 +22,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/help" element={<Help />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         {!token && (
           <>
             <Route path="/" element={<Login />} />
@@ -27,6 +30,9 @@ export default function App() {
           </>
         )}
 
+        {token && (
+          <Route path="/change-password" element={<ChangePassword />} />
+        )}
         {token && role === "requester" && (
           <>
             <Route path="/" element={<RequesterDashboard />} />

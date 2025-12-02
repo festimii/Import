@@ -326,6 +326,15 @@ export default function RequesterHistory() {
             Help
           </Button>,
           <Button
+            key="change-password"
+            variant="outlined"
+            color="inherit"
+            component={RouterLink}
+            to="/change-password"
+          >
+            Change password
+          </Button>,
+          <Button
             key="dashboard"
             variant="outlined"
             startIcon={<HomeRoundedIcon />}
