@@ -134,48 +134,51 @@ router.get(
     try {
       await ensurePlanogramSchema();
       const pool = await planogramPoolPromise;
-      const request = pool
-        .request()
-        .input("Internal_ID", sql.VarChar(20), internalId);
+      const whereParts = ["p.Internal_ID = @Internal_ID"];
 
-      let query = `SELECT p.*, k.ImeArt
-                   FROM dbo.PlanogramLayout p
-                   LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
-                   WHERE p.Internal_ID = @Internal_ID`;
+      const applyFilters = (req) => {
+        req.input("Internal_ID", sql.VarChar(20), internalId);
+        if (planogramId) req.input("Planogram_ID", sql.VarChar(20), planogramId);
+        if (moduleId) req.input("Module_ID", sql.VarChar(20), moduleId);
+        return req;
+      };
 
-      if (planogramId) {
-        request.input("Planogram_ID", sql.VarChar(20), planogramId);
-        query += " AND p.Planogram_ID = @Planogram_ID";
-      }
-      if (moduleId) {
-        request.input("Module_ID", sql.VarChar(20), moduleId);
-        query += " AND p.Module_ID = @Module_ID";
-      }
-      if (missingXyz) {
-        query += " AND (p.X IS NULL OR p.Y IS NULL OR p.Z IS NULL)";
-      }
-      if (missingPhoto) {
-        query +=
-          " AND (p.PhotoUrl IS NULL OR LTRIM(RTRIM(p.PhotoUrl)) = '' OR p.PhotoUrl = '')";
-      }
+      if (planogramId) whereParts.push("p.Planogram_ID = @Planogram_ID");
+      if (moduleId) whereParts.push("p.Module_ID = @Module_ID");
+      if (missingXyz) whereParts.push("(p.X IS NULL OR p.Y IS NULL OR p.Z IS NULL)");
+      if (missingPhoto)
+        whereParts.push(
+          "(p.PhotoUrl IS NULL OR LTRIM(RTRIM(p.PhotoUrl)) = '' OR p.PhotoUrl = '')"
+        );
 
-      query += " ORDER BY p.Planogram_ID, p.Module_ID, p.Sifra_Art";
-      query += " OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+      const whereClause = `WHERE ${whereParts.join(" AND ")}`;
+
+      const dataQuery = `
+        SELECT p.*, k.ImeArt
+        FROM dbo.PlanogramLayout p
+        LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+        ${whereClause}
+        ORDER BY p.Planogram_ID, p.Module_ID, p.Sifra_Art
+        OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+      `;
 
       const countQuery = `
         SELECT COUNT(*) AS Total
         FROM dbo.PlanogramLayout p
-        ${query.includes("WHERE") ? query.split("WHERE")[1].split("ORDER BY")[0].trim() ? " " + "WHERE" + " " + query.split("WHERE")[1].split("ORDER BY")[0].trim() : "" : ""}
+        ${whereClause}
       `;
 
-      const result = await request
+      const dataRequest = applyFilters(pool.request())
         .input("Offset", sql.Int, (page - 1) * pageSize)
-        .input("PageSize", sql.Int, pageSize)
-        .query(query);
+        .input("PageSize", sql.Int, pageSize);
+      const countRequest = applyFilters(pool.request());
 
-      const countResult = await request.query(countQuery);
+      const [result, countResult] = await Promise.all([
+        dataRequest.query(dataQuery),
+        countRequest.query(countQuery),
+      ]);
+
       const total = countResult.recordset?.[0]?.Total ?? result.recordset.length;
-
       const enriched = await attachDerivedPhotos(result.recordset);
       res.json({
         items: enriched.map((record) => mapPlanogramRecord(record)),
@@ -253,19 +256,15 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
   try {
     await ensurePlanogramSchema();
     const pool = await planogramPoolPromise;
-    const request = pool.request();
 
     const conditions = [];
     if (internalId) {
-      request.input("Internal_ID", sql.VarChar(20), internalId);
       conditions.push("p.Internal_ID = @Internal_ID");
     }
     if (planogramId) {
-      request.input("Planogram_ID", sql.VarChar(20), planogramId);
       conditions.push("p.Planogram_ID = @Planogram_ID");
     }
     if (moduleId) {
-      request.input("Module_ID", sql.VarChar(20), moduleId);
       conditions.push("p.Module_ID = @Module_ID");
     }
     if (missingXyz) {
@@ -299,12 +298,32 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
       ${whereClause}
     `;
 
-    const result = await request
+    const dataRequest = pool.request();
+    const countRequest = pool.request();
+
+    if (internalId) {
+      dataRequest.input("Internal_ID", sql.VarChar(20), internalId);
+      countRequest.input("Internal_ID", sql.VarChar(20), internalId);
+    }
+    if (planogramId) {
+      dataRequest.input("Planogram_ID", sql.VarChar(20), planogramId);
+      countRequest.input("Planogram_ID", sql.VarChar(20), planogramId);
+    }
+    if (moduleId) {
+      dataRequest.input("Module_ID", sql.VarChar(20), moduleId);
+      countRequest.input("Module_ID", sql.VarChar(20), moduleId);
+    }
+
+    if (missingXyz || missingPhoto) {
+      // no params needed for the null checks
+    }
+
+    const result = await dataRequest
       .input("Offset", sql.Int, (page - 1) * pageSize)
       .input("PageSize", sql.Int, pageSize)
       .query(pagedQuery);
 
-    const countResult = await request.query(countQuery);
+    const countResult = await countRequest.query(countQuery);
     const total = countResult.recordset?.[0]?.Total ?? result.recordset.length;
 
     const enriched = await attachDerivedPhotos(result.recordset);

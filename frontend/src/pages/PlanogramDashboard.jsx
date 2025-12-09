@@ -105,6 +105,7 @@ export default function PlanogramDashboard() {
   const [selectedExistingFile, setSelectedExistingFile] = useState("");
   const [formValues, setFormValues] = useState(emptyForm);
   const [selectedKey, setSelectedKey] = useState(null);
+  const [lastQuery, setLastQuery] = useState(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalPlanograms, setTotalPlanograms] = useState(0);
@@ -141,46 +142,32 @@ export default function PlanogramDashboard() {
     setSelectedKey(null);
   };
 
-  const handleSearch = async (event) => {
-    event?.preventDefault?.();
-    setLookupFeedback(null);
-
-    const trimmedInternalId = internalIdInput.trim();
-    const trimmedPlanogramId = planogramIdFilter.trim();
-    const trimmedModule = moduleFilter.trim();
-    const paddedInternalId = padInternalId(trimmedInternalId);
-
-    // reset pagination when initiating search manually
-    setPage(0);
-
+  const fetchPlanograms = async ({
+    pageIndex = page,
+    pageSize = rowsPerPage,
+    filters = lastQuery,
+  } = {}) => {
     if (
-      !trimmedInternalId &&
-      !trimmedPlanogramId &&
-      !trimmedModule &&
-      !missingXyzFilter &&
-      !missingPhotoFilter
+      !filters ||
+      (!filters.internalId &&
+        !filters.planogramId &&
+        !filters.moduleId &&
+        !filters.missingXyz &&
+        !filters.missingPhoto)
     ) {
-      setLookupFeedback({
-        severity: "warning",
-        message:
-          "Provide a filter (Internal ID, Planogram ID, Module, Missing XYZ or Missing Photo).",
-      });
       return;
     }
 
     setLoading(true);
     try {
-      const params = {};
-      if (trimmedInternalId) params.internalId = paddedInternalId;
-      if (trimmedPlanogramId) params.planogramId = trimmedPlanogramId;
-      if (trimmedModule) params.moduleId = trimmedModule;
-      if (missingXyzFilter) params.missingXyz = "true";
-      if (missingPhotoFilter) params.missingPhoto = "true";
-      params.page = 1;
-      params.pageSize = rowsPerPage;
+      const params = {
+        ...filters,
+        page: pageIndex + 1,
+        pageSize,
+      };
 
-      const endpoint = trimmedInternalId
-        ? `/planograms/by-internal/${encodeURIComponent(paddedInternalId)}`
+      const endpoint = filters.internalId
+        ? `/planograms/by-internal/${encodeURIComponent(filters.internalId)}`
         : "/planograms/search";
 
       const res = await API.get(endpoint, { params });
@@ -196,20 +183,6 @@ export default function PlanogramDashboard() {
       } else {
         setSelectedKey(null);
       }
-      setFormValues((prev) => ({
-        ...prev,
-        internalId: prev.internalId || paddedInternalId,
-        planogramId: prev.planogramId || trimmedPlanogramId,
-        moduleId: prev.moduleId || trimmedModule,
-      }));
-
-      setLookupFeedback({
-        severity: records.length === 0 ? "info" : "success",
-        message:
-          records.length === 0
-            ? "No layouts found. Add one below."
-            : `Loaded ${records.length} layout(s).`,
-      });
     } catch (error) {
       setLookupFeedback({
         severity: "error",
@@ -218,6 +191,44 @@ export default function PlanogramDashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSearch = async (event) => {
+    event?.preventDefault?.();
+    setLookupFeedback(null);
+
+    const trimmedInternalId = internalIdInput.trim();
+    const trimmedPlanogramId = planogramIdFilter.trim();
+    const trimmedModule = moduleFilter.trim();
+    const paddedInternalId = padInternalId(trimmedInternalId);
+
+    const hasFilter =
+      trimmedInternalId ||
+      trimmedPlanogramId ||
+      trimmedModule ||
+      missingXyzFilter ||
+      missingPhotoFilter;
+
+    if (!hasFilter) {
+      setLookupFeedback({
+        severity: "warning",
+        message:
+          "Provide a filter (Internal ID, Planogram ID, Module, Missing XYZ or Missing Photo).",
+      });
+      return;
+    }
+
+    const filters = {
+      internalId: paddedInternalId || undefined,
+      planogramId: trimmedPlanogramId || undefined,
+      moduleId: trimmedModule || undefined,
+      missingXyz: missingXyzFilter ? "true" : undefined,
+      missingPhoto: missingPhotoFilter ? "true" : undefined,
+    };
+
+    setPage(0);
+    setLastQuery(filters);
+    await fetchPlanograms({ pageIndex: 0, pageSize: rowsPerPage, filters });
   };
 
   const handleSave = async (event) => {
@@ -466,6 +477,18 @@ export default function PlanogramDashboard() {
     }
   };
 
+  const handlePageChange = async (_event, newPage) => {
+    setPage(newPage);
+    await fetchPlanograms({ pageIndex: newPage });
+  };
+
+  const handleRowsPerPageChange = async (event) => {
+    const next = parseInt(event.target.value, 10);
+    setRowsPerPage(next);
+    setPage(0);
+    await fetchPlanograms({ pageIndex: 0, pageSize: next });
+  };
+
   const photoSrc = useMemo(() => {
     if (!selectedPlanogram?.photoUrl) {
       return null;
@@ -650,6 +673,7 @@ export default function PlanogramDashboard() {
                       setPlanograms([]);
                       setTotalPlanograms(0);
                       setPage(0);
+                      setLastQuery(null);
                       resetForm();
                       setLookupFeedback(null);
                     }}
@@ -810,12 +834,9 @@ export default function PlanogramDashboard() {
                 component="div"
                 count={totalPlanograms}
                 page={page}
-                onPageChange={(_event, newPage) => setPage(newPage)}
+                onPageChange={handlePageChange}
                 rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(event) => {
-                  setRowsPerPage(parseInt(event.target.value, 10));
-                  setPage(0);
-                }}
+                onRowsPerPageChange={handleRowsPerPageChange}
                 rowsPerPageOptions={[10, 25, 50, 100]}
               />
             </TableContainer>
@@ -999,7 +1020,14 @@ export default function PlanogramDashboard() {
                       <img
                         src={photoSrc}
                         alt="Planogram reference"
-                        style={{ width: "100%", display: "block" }}
+                        style={{
+                          width: "100%",
+                          maxWidth: 300,
+                          maxHeight: 300,
+                          display: "block",
+                          objectFit: "contain",
+                          margin: "0 auto",
+                        }}
                       />
                     </Box>
                   ) : (
