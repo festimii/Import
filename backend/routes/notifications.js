@@ -9,7 +9,7 @@ import {
 } from "../services/notifications.js";
 
 const router = express.Router();
-const allowedRoles = ["admin", "confirmer", "requester"];
+const allowedRoles = ["admin", "confirmer", "requester", "planogram"];
 
 // ===========================================================
 // 1️⃣  FRONTEND PUSH SUBSCRIPTION HANDLERS

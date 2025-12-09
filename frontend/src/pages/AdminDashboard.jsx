@@ -31,6 +31,7 @@ import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
 import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
+import ViewCompactRoundedIcon from "@mui/icons-material/ViewCompactRounded";
 import API from "../api";
 import UserManagementDialog from "../components/UserManagementDialog";
 import CalendarOverview from "../components/CalendarOverview";
@@ -255,21 +256,23 @@ export default function AdminDashboard() {
     setUserFeedback(null);
   };
 
-  const { totalUsers, confirmerCount, requesterCount } = useMemo(() => {
+  const { totalUsers, confirmerCount, requesterCount, planogramCount } = useMemo(() => {
     const total = users.length;
     const counts = users.reduce(
       (acc, user) => {
         if (user.Role === "confirmer") acc.confirmer += 1;
         if (user.Role === "requester") acc.requester += 1;
+        if (user.Role === "planogram") acc.planogram += 1;
         return acc;
       },
-      { confirmer: 0, requester: 0 }
+      { confirmer: 0, requester: 0, planogram: 0 }
     );
 
     return {
       totalUsers: total,
       confirmerCount: counts.confirmer,
       requesterCount: counts.requester,
+      planogramCount: counts.planogram,
     };
   }, [users]);
 
@@ -791,7 +794,7 @@ export default function AdminDashboard() {
         <Stack spacing={4}>
           <SectionCard
             title="Organization health"
-            description="Monitor how many users can submit, confirm or administer requests."
+            description="Monitor how many users can submit, confirm, curate planograms or administer requests."
             action={
               <Button variant="outlined" onClick={handleOpenUserDialog}>
                 Manage users
@@ -804,7 +807,7 @@ export default function AdminDashboard() {
               </Alert>
             )}
             <Grid container spacing={3}>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} sm={6} md={3}>
                 <StatCard
                   icon={<GroupsRoundedIcon />}
                   label="Active users"
@@ -812,7 +815,7 @@ export default function AdminDashboard() {
                   trend="Invite colleagues to streamline handoffs"
                 />
               </Grid>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} sm={6} md={3}>
                 <StatCard
                   icon={<VerifiedUserRoundedIcon />}
                   label="Confirmers"
@@ -821,13 +824,22 @@ export default function AdminDashboard() {
                   color="secondary"
                 />
               </Grid>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} sm={6} md={3}>
                 <StatCard
                   icon={<EventBusyRoundedIcon />}
                   label="Requesters"
                   value={usersLoading ? "" : requesterCount}
                   trend="Balance intake across teams"
                   color="info"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <StatCard
+                  icon={<ViewCompactRoundedIcon />}
+                  label="Planogram"
+                  value={usersLoading ? "" : planogramCount}
+                  trend="Own shelf layouts and imagery"
+                  color="warning"
                 />
               </Grid>
             </Grid>

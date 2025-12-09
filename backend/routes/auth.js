@@ -88,7 +88,7 @@ router.get("/users", verifyRole(["admin"]), async (req, res) => {
 router.patch("/users/:username", verifyRole(["admin"]), async (req, res) => {
   const { username } = req.params;
   const { role } = req.body;
-  const allowedRoles = ["requester", "confirmer", "admin"];
+  const allowedRoles = ["requester", "confirmer", "admin", "planogram"];
 
   if (!allowedRoles.includes(role)) {
     return res.status(400).json({ message: "Invalid role provided." });

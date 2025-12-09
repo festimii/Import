@@ -9,6 +9,7 @@ import Register from "./pages/Register";
 import RequesterDashboard from "./pages/RequesterDashboard";
 import ConfirmerDashboard from "./pages/ConfirmerDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import PlanogramDashboard from "./pages/PlanogramDashboard";
 import RequesterHistory from "./pages/RequesterHistory";
 import Help from "./pages/Help";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -41,6 +42,12 @@ export default function App() {
         )}
         {token && role === "confirmer" && (
           <Route path="/" element={<ConfirmerDashboard />} />
+        )}
+        {token && role === "planogram" && (
+          <>
+            <Route path="/" element={<PlanogramDashboard />} />
+            <Route path="/planogram" element={<PlanogramDashboard />} />
+          </>
         )}
         {token && role === "admin" && (
           <Route path="/" element={<AdminDashboard />} />

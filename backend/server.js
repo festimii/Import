@@ -1,13 +1,21 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import authRoutes from "./routes/auth.js";
 import importRoutes from "./routes/imports.js";
 import notificationRoutes from "./routes/notifications.js";
+import planogramRoutes from "./routes/planograms.js";
+import {
+  ensurePlanogramPhotoDirSync,
+  getPlanogramPhotoDir,
+} from "./services/planograms.js";
 import { startWmsOrdersSync } from "./services/wmsOrdersSync.js";
 
 dotenv.config();
 const app = express();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 app.use(
   cors({
@@ -18,11 +26,18 @@ app.use(
 );
 
 app.use(express.json());
+ensurePlanogramPhotoDirSync();
+
+app.use(
+  "/planogram-photos",
+  express.static(getPlanogramPhotoDir() || path.join(__dirname, "data"))
+);
 
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/imports", importRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/planograms", planogramRoutes);
 
 // Default route
 app.get("/", (req, res) => res.send("✅ Import Tracker API Running"));

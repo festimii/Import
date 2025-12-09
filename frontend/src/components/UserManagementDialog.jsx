@@ -87,6 +87,7 @@ const UserManagementDialog = ({
                           >
                             <MenuItem value="requester">Requester</MenuItem>
                             <MenuItem value="confirmer">Confirmer</MenuItem>
+                            <MenuItem value="planogram">Planogram</MenuItem>
                             <MenuItem value="admin">Admin</MenuItem>
                           </Select>
                         </FormControl>
