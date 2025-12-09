@@ -1,9 +1,10 @@
+import fs from "fs";
+import path from "path";
 import express from "express";
 import sql from "mssql";
 import multer from "multer";
-import path from "path";
 import { verifyRole } from "../middleware/auth.js";
-import { poolPromise } from "../db.js";
+import { planogramPoolPromise } from "../db_planogram.js";
 import {
   ensurePlanogramPhotoDirSync,
   ensurePlanogramSchema,
@@ -15,28 +16,31 @@ const router = express.Router();
 const allowedRoles = ["admin", "planogram"];
 
 const normalizeText = (value, maxLength = 20) => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
+  if (value === null || value === undefined) return null;
   const trimmed = String(value).trim();
-  if (!trimmed) {
-    return null;
-  }
-
+  if (!trimmed) return null;
   return trimmed.slice(0, maxLength);
 };
 
-const toDecimal = (value) => {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
+const normalizeInternalId = (value) => {
+  const normalized = normalizeText(value, 6);
+  if (!normalized) return null;
+  const digits = normalized.replace(/\D/g, "");
+  if (!digits) return normalized;
+  return digits.padStart(6, "0").slice(-6);
+};
 
+const toDecimal = (value) => {
+  if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return null;
-  }
-  return Number(numeric.toFixed(2));
+  return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : null;
+};
+
+const parseBoolean = (value) => {
+  if (value === true || value === false) return value;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
 };
 
 ensurePlanogramPhotoDirSync();
@@ -54,7 +58,9 @@ const storage = multer.diskStorage({
         req.params.sifraArt || req.body.sifraArt || "article"
       )?.replace(/[^a-zA-Z0-9_-]/g, "_") || "article";
     const extension = path.extname(file.originalname || "") || ".jpg";
-    cb(null, `${safeInternalId}-${safeSifra}-${Date.now()}${extension}`);
+    const baseName = path.basename(file.originalname || "", extension);
+    const cleanBase = baseName.replace(/[^a-zA-Z0-9_-]/g, "_") || "photo";
+    cb(null, `${safeInternalId}-${safeSifra}-${cleanBase}-${Date.now()}${extension}`);
   },
 });
 
@@ -73,8 +79,12 @@ router.get(
   "/by-internal/:internalId",
   verifyRole(allowedRoles),
   async (req, res) => {
-    const internalId = normalizeText(req.params.internalId);
+    const internalIdRaw = req.params.internalId;
+    const internalId = normalizeInternalId(internalIdRaw);
     const planogramId = normalizeText(req.query.planogramId);
+    const moduleId = normalizeText(req.query.moduleId);
+    const missingXyz = parseBoolean(req.query.missingXyz);
+    const missingPhoto = parseBoolean(req.query.missingPhoto);
 
     if (!internalId) {
       return res
@@ -84,21 +94,33 @@ router.get(
 
     try {
       await ensurePlanogramSchema();
-      const pool = await poolPromise;
+      const pool = await planogramPoolPromise;
       const request = pool
         .request()
         .input("Internal_ID", sql.VarChar(20), internalId);
 
-      let query = `SELECT *
-                   FROM dbo.PlanogramLayout
-                   WHERE Internal_ID = @Internal_ID`;
+      let query = `SELECT p.*, k.ImeArt
+                   FROM dbo.PlanogramLayout p
+                   LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+                   WHERE p.Internal_ID = @Internal_ID`;
 
       if (planogramId) {
         request.input("Planogram_ID", sql.VarChar(20), planogramId);
-        query += " AND Planogram_ID = @Planogram_ID";
+        query += " AND p.Planogram_ID = @Planogram_ID";
+      }
+      if (moduleId) {
+        request.input("Module_ID", sql.VarChar(20), moduleId);
+        query += " AND p.Module_ID = @Module_ID";
+      }
+      if (missingXyz) {
+        query += " AND (p.X IS NULL OR p.Y IS NULL OR p.Z IS NULL)";
+      }
+      if (missingPhoto) {
+        query +=
+          " AND (p.PhotoUrl IS NULL OR LTRIM(RTRIM(p.PhotoUrl)) = '' OR p.PhotoUrl = '')";
       }
 
-      query += " ORDER BY Planogram_ID, Module_ID, Sifra_Art";
+      query += " ORDER BY p.Planogram_ID, p.Module_ID, p.Sifra_Art";
 
       const result = await request.query(query);
       res.json(result.recordset.map((record) => mapPlanogramRecord(record)));
@@ -115,7 +137,7 @@ router.get(
   "/:internalId/:sifraArt",
   verifyRole(allowedRoles),
   async (req, res) => {
-    const internalId = normalizeText(req.params.internalId);
+    const internalId = normalizeInternalId(req.params.internalId);
     const sifraArt = normalizeText(req.params.sifraArt);
 
     if (!internalId || !sifraArt) {
@@ -126,14 +148,15 @@ router.get(
 
     try {
       await ensurePlanogramSchema();
-      const pool = await poolPromise;
+      const pool = await planogramPoolPromise;
       const result = await pool
         .request()
         .input("Internal_ID", sql.VarChar(20), internalId)
         .input("Sifra_Art", sql.VarChar(20), sifraArt).query(`
-          SELECT *
-          FROM dbo.PlanogramLayout
-          WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art
+          SELECT p.*, k.ImeArt
+          FROM dbo.PlanogramLayout p
+          LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+          WHERE p.Internal_ID = @Internal_ID AND p.Sifra_Art = @Sifra_Art
         `);
 
       if (result.recordset.length === 0) {
@@ -150,9 +173,72 @@ router.get(
   }
 );
 
+router.get("/search", verifyRole(allowedRoles), async (req, res) => {
+  const internalIdRaw = req.query.internalId;
+  const internalId = normalizeInternalId(internalIdRaw);
+  const planogramId = normalizeText(req.query.planogramId);
+  const moduleId = normalizeText(req.query.moduleId);
+  const missingXyz = parseBoolean(req.query.missingXyz);
+  const missingPhoto = parseBoolean(req.query.missingPhoto);
+
+  if (!internalId && !planogramId && !moduleId && !missingXyz && !missingPhoto) {
+    return res.status(400).json({
+      message:
+        "Provide at least one filter: internalId, planogramId, moduleId, missingXyz or missingPhoto.",
+    });
+  }
+
+  try {
+    await ensurePlanogramSchema();
+    const pool = await planogramPoolPromise;
+    const request = pool.request();
+
+    const conditions = [];
+    if (internalId) {
+      request.input("Internal_ID", sql.VarChar(20), internalId);
+      conditions.push("p.Internal_ID = @Internal_ID");
+    }
+    if (planogramId) {
+      request.input("Planogram_ID", sql.VarChar(20), planogramId);
+      conditions.push("p.Planogram_ID = @Planogram_ID");
+    }
+    if (moduleId) {
+      request.input("Module_ID", sql.VarChar(20), moduleId);
+      conditions.push("p.Module_ID = @Module_ID");
+    }
+    if (missingXyz) {
+      conditions.push("(p.X IS NULL OR p.Y IS NULL OR p.Z IS NULL)");
+    }
+    if (missingPhoto) {
+      conditions.push(
+        "(p.PhotoUrl IS NULL OR LTRIM(RTRIM(p.PhotoUrl)) = '' OR p.PhotoUrl = '')"
+      );
+    }
+
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const query = `
+      SELECT p.*, k.ImeArt
+      FROM dbo.PlanogramLayout p
+      LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+      ${whereClause}
+      ORDER BY p.Planogram_ID, p.Module_ID, p.Internal_ID, p.Sifra_Art
+    `;
+
+    const result = await request.query(query);
+    res.json(result.recordset.map((record) => mapPlanogramRecord(record)));
+  } catch (error) {
+    console.error("Planogram search error:", error.message);
+    res
+      .status(500)
+      .json({ message: "Unable to search planogram layouts right now." });
+  }
+});
+
 router.post("/", verifyRole(allowedRoles), async (req, res) => {
   const { internalId, sifraArt, moduleId, x, y, z, planogramId } = req.body;
-  const normalizedInternalId = normalizeText(internalId);
+  const normalizedInternalId = normalizeInternalId(internalId);
   const normalizedSifraArt = normalizeText(sifraArt);
 
   if (!normalizedInternalId || !normalizedSifraArt) {
@@ -163,7 +249,7 @@ router.post("/", verifyRole(allowedRoles), async (req, res) => {
 
   try {
     await ensurePlanogramSchema();
-    const pool = await poolPromise;
+    const pool = await planogramPoolPromise;
     const result = await pool
       .request()
       .input("Internal_ID", sql.VarChar(20), normalizedInternalId)
@@ -197,9 +283,10 @@ router.post("/", verifyRole(allowedRoles), async (req, res) => {
           );
         END;
 
-        SELECT *
-        FROM dbo.PlanogramLayout
-        WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art;
+        SELECT p.*, k.ImeArt
+        FROM dbo.PlanogramLayout p
+        LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+        WHERE p.Internal_ID = @Internal_ID AND p.Sifra_Art = @Sifra_Art;
       `);
 
     res.status(201).json({
@@ -218,7 +305,7 @@ router.delete(
   "/:internalId/:sifraArt",
   verifyRole(allowedRoles),
   async (req, res) => {
-    const internalId = normalizeText(req.params.internalId);
+    const internalId = normalizeInternalId(req.params.internalId);
     const sifraArt = normalizeText(req.params.sifraArt);
 
     if (!internalId || !sifraArt) {
@@ -229,7 +316,7 @@ router.delete(
 
     try {
       await ensurePlanogramSchema();
-      const pool = await poolPromise;
+      const pool = await planogramPoolPromise;
       const result = await pool
         .request()
         .input("Internal_ID", sql.VarChar(20), internalId)
@@ -260,7 +347,7 @@ router.post(
   verifyRole(allowedRoles),
   upload.single("photo"),
   async (req, res) => {
-    const internalId = normalizeText(req.params.internalId);
+    const internalId = normalizeInternalId(req.params.internalId);
     const sifraArt = normalizeText(req.params.sifraArt);
 
     if (!internalId || !sifraArt) {
@@ -276,30 +363,34 @@ router.post(
     try {
       await ensurePlanogramSchema();
       const photoUrl = `/planogram-photos/${req.file.filename}`;
-      const pool = await poolPromise;
+      const photoOriginalName = req.file.originalname || req.file.filename;
+      const pool = await planogramPoolPromise;
       const result = await pool
         .request()
         .input("Internal_ID", sql.VarChar(20), internalId)
         .input("Sifra_Art", sql.VarChar(20), sifraArt)
-        .input("PhotoUrl", sql.NVarChar(500), photoUrl).query(`
+        .input("PhotoUrl", sql.NVarChar(500), photoUrl)
+        .input("PhotoOriginalName", sql.NVarChar(255), photoOriginalName).query(`
           IF EXISTS (
             SELECT 1 FROM dbo.PlanogramLayout
             WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art
           )
           BEGIN
             UPDATE dbo.PlanogramLayout
-            SET PhotoUrl = @PhotoUrl
+            SET PhotoUrl = @PhotoUrl,
+                PhotoOriginalName = @PhotoOriginalName
             WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art;
           END
           ELSE
           BEGIN
-            INSERT INTO dbo.PlanogramLayout (Internal_ID, Sifra_Art, PhotoUrl)
-            VALUES (@Internal_ID, @Sifra_Art, @PhotoUrl);
+            INSERT INTO dbo.PlanogramLayout (Internal_ID, Sifra_Art, PhotoUrl, PhotoOriginalName)
+            VALUES (@Internal_ID, @Sifra_Art, @PhotoUrl, @PhotoOriginalName);
           END;
 
-          SELECT *
-          FROM dbo.PlanogramLayout
-          WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art;
+          SELECT p.*, k.ImeArt
+          FROM dbo.PlanogramLayout p
+          LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+          WHERE p.Internal_ID = @Internal_ID AND p.Sifra_Art = @Sifra_Art;
         `);
 
       res.status(201).json({
@@ -311,6 +402,96 @@ router.post(
       res
         .status(500)
         .json({ message: "Unable to upload the photo at the moment." });
+    }
+  }
+);
+
+router.get("/photos", verifyRole(allowedRoles), async (_req, res) => {
+  try {
+    const files = await fs.promises.readdir(photoDir);
+    const images = files.filter((file) =>
+      /\.(png|jpe?g|webp|gif|bmp)$/i.test(file)
+    );
+    res.json({ files: images });
+  } catch (error) {
+    console.error("Planogram photo list error:", error.message);
+    res.status(500).json({ message: "Unable to list planogram photos." });
+  }
+});
+
+router.post(
+  "/:internalId/:sifraArt/photo/link",
+  verifyRole(allowedRoles),
+  async (req, res) => {
+    const internalId = normalizeInternalId(req.params.internalId);
+    const sifraArt = normalizeText(req.params.sifraArt);
+    const { filename } = req.body || {};
+
+    if (!internalId || !sifraArt) {
+      return res
+        .status(400)
+        .json({ message: "Both Internal_ID and Sifra_Art are required." });
+    }
+
+    if (!filename || typeof filename !== "string") {
+      return res.status(400).json({ message: "Filename is required." });
+    }
+
+    const sanitized = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, "");
+    const targetPath = path.join(photoDir, sanitized);
+
+    try {
+      const stat = await fs.promises.stat(targetPath);
+      if (!stat.isFile()) {
+        return res.status(400).json({ message: "File is not a valid image." });
+      }
+    } catch (error) {
+      return res
+        .status(404)
+        .json({ message: "File not found in planogram photos directory." });
+    }
+
+    try {
+      await ensurePlanogramSchema();
+      const photoUrl = `/planogram-photos/${sanitized}`;
+      const pool = await planogramPoolPromise;
+      const result = await pool
+        .request()
+        .input("Internal_ID", sql.VarChar(20), internalId)
+        .input("Sifra_Art", sql.VarChar(20), sifraArt)
+        .input("PhotoUrl", sql.NVarChar(500), photoUrl)
+        .input("PhotoOriginalName", sql.NVarChar(255), sanitized).query(`
+          IF EXISTS (
+            SELECT 1 FROM dbo.PlanogramLayout
+            WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art
+          )
+          BEGIN
+            UPDATE dbo.PlanogramLayout
+            SET PhotoUrl = @PhotoUrl,
+                PhotoOriginalName = @PhotoOriginalName
+            WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art;
+          END
+          ELSE
+          BEGIN
+            INSERT INTO dbo.PlanogramLayout (Internal_ID, Sifra_Art, PhotoUrl, PhotoOriginalName)
+            VALUES (@Internal_ID, @Sifra_Art, @PhotoUrl, @PhotoOriginalName);
+          END;
+
+          SELECT p.*, k.ImeArt
+          FROM dbo.PlanogramLayout p
+          LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+          WHERE p.Internal_ID = @Internal_ID AND p.Sifra_Art = @Sifra_Art;
+        `);
+
+      res.json({
+        message: "Photo linked successfully.",
+        planogram: mapPlanogramRecord(result.recordset[0]),
+      });
+    } catch (error) {
+      console.error("Planogram link photo error:", error.message);
+      res
+        .status(500)
+        .json({ message: "Unable to link the existing photo right now." });
     }
   }
 );
