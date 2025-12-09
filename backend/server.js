@@ -11,6 +11,7 @@ import {
   ensurePlanogramPhotoDirSync,
   getPlanogramPhotoDir,
 } from "./services/planograms.js";
+import { startPlanogramPhotoSync } from "./services/planogramPhotoSync.js";
 import { startWmsOrdersSync } from "./services/wmsOrdersSync.js";
 
 dotenv.config();
@@ -43,6 +44,7 @@ app.use("/api/planograms", planogramRoutes);
 app.get("/", (req, res) => res.send("✅ Import Tracker API Running"));
 
 startWmsOrdersSync();
+startPlanogramPhotoSync();
 
 const PORT = 5000;
 

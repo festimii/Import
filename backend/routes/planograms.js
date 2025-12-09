@@ -122,6 +122,8 @@ router.get(
     const moduleId = normalizeText(req.query.moduleId);
     const missingXyz = parseBoolean(req.query.missingXyz);
     const missingPhoto = parseBoolean(req.query.missingPhoto);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.max(1, Math.min(200, parseInt(req.query.pageSize, 10) || 50));
 
     if (!internalId) {
       return res
@@ -158,10 +160,29 @@ router.get(
       }
 
       query += " ORDER BY p.Planogram_ID, p.Module_ID, p.Sifra_Art";
+      query += " OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
 
-      const result = await request.query(query);
+      const countQuery = `
+        SELECT COUNT(*) AS Total
+        FROM dbo.PlanogramLayout p
+        ${query.includes("WHERE") ? query.split("WHERE")[1].split("ORDER BY")[0].trim() ? " " + "WHERE" + " " + query.split("WHERE")[1].split("ORDER BY")[0].trim() : "" : ""}
+      `;
+
+      const result = await request
+        .input("Offset", sql.Int, (page - 1) * pageSize)
+        .input("PageSize", sql.Int, pageSize)
+        .query(query);
+
+      const countResult = await request.query(countQuery);
+      const total = countResult.recordset?.[0]?.Total ?? result.recordset.length;
+
       const enriched = await attachDerivedPhotos(result.recordset);
-      res.json(enriched.map((record) => mapPlanogramRecord(record)));
+      res.json({
+        items: enriched.map((record) => mapPlanogramRecord(record)),
+        total,
+        page,
+        pageSize,
+      });
     } catch (error) {
       console.error("Planogram lookup error:", error.message);
       res
@@ -219,6 +240,8 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
   const moduleId = normalizeText(req.query.moduleId);
   const missingXyz = parseBoolean(req.query.missingXyz);
   const missingPhoto = parseBoolean(req.query.missingPhoto);
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const pageSize = Math.max(1, Math.min(200, parseInt(req.query.pageSize, 10) || 50));
 
   if (!internalId && !planogramId && !moduleId && !missingXyz && !missingPhoto) {
     return res.status(400).json({
@@ -257,17 +280,40 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const query = `
+    const queryBase = `
       SELECT p.*, k.ImeArt
       FROM dbo.PlanogramLayout p
       LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
       ${whereClause}
-      ORDER BY p.Planogram_ID, p.Module_ID, p.Internal_ID, p.Sifra_Art
     `;
 
-    const result = await request.query(query);
+    const pagedQuery = `
+      ${queryBase}
+      ORDER BY p.Planogram_ID, p.Module_ID, p.Internal_ID, p.Sifra_Art
+      OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+    `;
+
+    const countQuery = `
+      SELECT COUNT(*) AS Total
+      FROM dbo.PlanogramLayout p
+      ${whereClause}
+    `;
+
+    const result = await request
+      .input("Offset", sql.Int, (page - 1) * pageSize)
+      .input("PageSize", sql.Int, pageSize)
+      .query(pagedQuery);
+
+    const countResult = await request.query(countQuery);
+    const total = countResult.recordset?.[0]?.Total ?? result.recordset.length;
+
     const enriched = await attachDerivedPhotos(result.recordset);
-    res.json(enriched.map((record) => mapPlanogramRecord(record)));
+    res.json({
+      items: enriched.map((record) => mapPlanogramRecord(record)),
+      total,
+      page,
+      pageSize,
+    });
   } catch (error) {
     console.error("Planogram search error:", error.message);
     res

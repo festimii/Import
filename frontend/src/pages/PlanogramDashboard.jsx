@@ -15,6 +15,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  TablePagination,
   Stack,
   Table,
   TableBody,
@@ -104,6 +105,9 @@ export default function PlanogramDashboard() {
   const [selectedExistingFile, setSelectedExistingFile] = useState("");
   const [formValues, setFormValues] = useState(emptyForm);
   const [selectedKey, setSelectedKey] = useState(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalPlanograms, setTotalPlanograms] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const backendBaseUrl = useMemo(() => resolveBackendBase(), []);
@@ -146,6 +150,9 @@ export default function PlanogramDashboard() {
     const trimmedModule = moduleFilter.trim();
     const paddedInternalId = padInternalId(trimmedInternalId);
 
+    // reset pagination when initiating search manually
+    setPage(0);
+
     if (
       !trimmedInternalId &&
       !trimmedPlanogramId &&
@@ -169,14 +176,18 @@ export default function PlanogramDashboard() {
       if (trimmedModule) params.moduleId = trimmedModule;
       if (missingXyzFilter) params.missingXyz = "true";
       if (missingPhotoFilter) params.missingPhoto = "true";
+      params.page = 1;
+      params.pageSize = rowsPerPage;
 
       const endpoint = trimmedInternalId
         ? `/planograms/by-internal/${encodeURIComponent(paddedInternalId)}`
         : "/planograms/search";
 
       const res = await API.get(endpoint, { params });
-      const records = Array.isArray(res.data) ? res.data : [];
+      const records = Array.isArray(res.data) ? res.data : res.data?.items ?? [];
+      const total = res.data?.total ?? records.length;
       setPlanograms(records);
+      setTotalPlanograms(total);
       if (records.length > 0) {
         setSelectedKey({
           internalId: records[0].internalId,
@@ -637,6 +648,8 @@ export default function PlanogramDashboard() {
                       setMissingXyzFilter(false);
                       setMissingPhotoFilter(false);
                       setPlanograms([]);
+                      setTotalPlanograms(0);
+                      setPage(0);
                       resetForm();
                       setLookupFeedback(null);
                     }}
@@ -681,7 +694,7 @@ export default function PlanogramDashboard() {
                 <TableBody>
                   {planograms.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8}>
+                      <TableCell colSpan={10}>
                         <Typography
                           variant="body2"
                           color="text.secondary"
@@ -793,6 +806,18 @@ export default function PlanogramDashboard() {
                   })}
                 </TableBody>
               </Table>
+              <TablePagination
+                component="div"
+                count={totalPlanograms}
+                page={page}
+                onPageChange={(_event, newPage) => setPage(newPage)}
+                rowsPerPage={rowsPerPage}
+                onRowsPerPageChange={(event) => {
+                  setRowsPerPage(parseInt(event.target.value, 10));
+                  setPage(0);
+                }}
+                rowsPerPageOptions={[10, 25, 50, 100]}
+              />
             </TableContainer>
           </SectionCard>
 
