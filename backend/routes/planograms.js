@@ -43,6 +43,43 @@ const parseBoolean = (value) => {
   return ["1", "true", "yes", "on"].includes(normalized);
 };
 
+const getPhotoFilenameMap = async () => {
+  const files = await fs.promises.readdir(photoDir);
+  const map = new Map();
+  files.forEach((file) => {
+    const base = path.parse(file).name;
+    if (!map.has(base)) {
+      map.set(base, file);
+    }
+  });
+  return map;
+};
+
+const attachDerivedPhotos = async (records) => {
+  if (!Array.isArray(records) || records.length === 0) return records;
+  let map = null;
+  try {
+    map = await getPhotoFilenameMap();
+  } catch (error) {
+    console.error("Planogram photo map error:", error.message);
+    return records;
+  }
+
+  return records.map((record) => {
+    if (record?.PhotoUrl || !record?.Internal_ID) {
+      return record;
+    }
+    const match = map.get(record.Internal_ID);
+    if (!match) return record;
+
+    return {
+      ...record,
+      PhotoUrl: `/planogram-photos/${match}`,
+      PhotoOriginalName: match,
+    };
+  });
+};
+
 ensurePlanogramPhotoDirSync();
 const photoDir = getPlanogramPhotoDir();
 
@@ -123,7 +160,8 @@ router.get(
       query += " ORDER BY p.Planogram_ID, p.Module_ID, p.Sifra_Art";
 
       const result = await request.query(query);
-      res.json(result.recordset.map((record) => mapPlanogramRecord(record)));
+      const enriched = await attachDerivedPhotos(result.recordset);
+      res.json(enriched.map((record) => mapPlanogramRecord(record)));
     } catch (error) {
       console.error("Planogram lookup error:", error.message);
       res
@@ -163,7 +201,8 @@ router.get(
         return res.status(404).json({ message: "Planogram layout not found." });
       }
 
-      res.json(mapPlanogramRecord(result.recordset[0]));
+      const enriched = await attachDerivedPhotos(result.recordset);
+      res.json(mapPlanogramRecord(enriched[0]));
     } catch (error) {
       console.error("Planogram fetch error:", error.message);
       res
@@ -227,7 +266,8 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
     `;
 
     const result = await request.query(query);
-    res.json(result.recordset.map((record) => mapPlanogramRecord(record)));
+    const enriched = await attachDerivedPhotos(result.recordset);
+    res.json(enriched.map((record) => mapPlanogramRecord(record)));
   } catch (error) {
     console.error("Planogram search error:", error.message);
     res
