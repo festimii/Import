@@ -29,10 +29,13 @@ app.use(
 app.use(express.json());
 ensurePlanogramPhotoDirSync();
 
-app.use(
-  "/planogram-photos",
-  express.static(getPlanogramPhotoDir() || path.join(__dirname, "data"))
-);
+const planogramPhotoRoot =
+  getPlanogramPhotoDir() || path.join(__dirname, "data", "planogram-photos");
+
+// Expose planogram photos under both /planogram-photos and /api/planogram-photos
+// so they load whether callers include the API prefix or not.
+app.use("/planogram-photos", express.static(planogramPhotoRoot));
+app.use("/api/planogram-photos", express.static(planogramPhotoRoot));
 
 // Routes
 app.use("/api/auth", authRoutes);

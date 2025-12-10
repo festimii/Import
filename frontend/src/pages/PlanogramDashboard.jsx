@@ -39,6 +39,7 @@ import PhotoCameraBackRoundedIcon from "@mui/icons-material/PhotoCameraBackRound
 import PageHero from "../components/PageHero";
 import SectionCard from "../components/SectionCard";
 import NotificationMenu from "../components/NotificationMenu";
+import OrientationPreview from "../components/OrientationPreview";
 import API from "../api";
 
 const emptyForm = {
@@ -75,6 +76,15 @@ const extractFileName = (value) => {
   if (!value) return "";
   const parts = String(value).split(/[/\\]/);
   return parts[parts.length - 1] || value;
+};
+
+const isXyzValid = (planogram) => {
+  if (!planogram) return false;
+  const coords = [planogram.x, planogram.y, planogram.z];
+  if (coords.some((value) => value === null || value === undefined || value === "")) {
+    return false;
+  }
+  return coords.every((value) => Number.isFinite(Number(value)));
 };
 
 const resolveBackendBase = () => {
@@ -121,6 +131,17 @@ export default function PlanogramDashboard() {
         item.sifraArt === selectedKey.sifraArt
     );
   }, [planograms, selectedKey]);
+
+  const xyzValid = useMemo(() => {
+    if (!selectedPlanogram) return false;
+    const coords = [selectedPlanogram.x, selectedPlanogram.y, selectedPlanogram.z];
+    const hasMissing = coords.some(
+      (value) => value === null || value === undefined || value === ""
+    );
+    const numbers = coords.map((value) => Number(value));
+    const hasInvalid = numbers.some((num) => !Number.isFinite(num));
+    return !hasMissing && !hasInvalid;
+  }, [selectedPlanogram]);
 
   const logout = () => {
     localStorage.clear();
@@ -763,21 +784,31 @@ export default function PlanogramDashboard() {
                             <Chip size="small" label="N/A" />
                           )}
                         </TableCell>
-                        <TableCell>{planogram.moduleId || "—"}</TableCell>
+                        <TableCell>{planogram.moduleId || "-"}</TableCell>
                         <TableCell>{formatDecimal(planogram.x)}</TableCell>
                         <TableCell>{formatDecimal(planogram.y)}</TableCell>
                         <TableCell>{formatDecimal(planogram.z)}</TableCell>
                         <TableCell>
-                          {planogram.photoUrl ? (
-                            <Chip
-                              label="Photo"
-                              color="success"
-                              size="small"
-                              variant="outlined"
-                            />
-                          ) : (
-                            <Chip label="Missing" size="small" />
-                          )}
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                            {planogram.photoUrl ? (
+                              <Chip
+                                label="Photo"
+                                color="success"
+                                size="small"
+                                variant="outlined"
+                              />
+                            ) : (
+                              <Chip label="Missing" size="small" />
+                            )}
+                            {!isXyzValid(planogram) && (
+                              <Chip
+                                label="XYZ issue"
+                                color="warning"
+                                size="small"
+                                variant="outlined"
+                              />
+                            )}
+                          </Stack>
                         </TableCell>
                         <TableCell>
                           {planogram.photoOriginalName ||
@@ -1009,43 +1040,93 @@ export default function PlanogramDashboard() {
                     </Alert>
                   )}
 
-                  {photoSrc ? (
-                    <Box
-                      sx={{
-                        borderRadius: 2,
-                        overflow: "hidden",
-                        border: (theme) => `1px solid ${theme.palette.divider}`,
-                      }}
-                    >
-                      <img
-                        src={photoSrc}
-                        alt="Planogram reference"
-                        style={{
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={2}
+                    alignItems="center"
+                    justifyContent="center"
+                  >
+                    {photoSrc ? (
+                      <Box
+                        sx={{
+                          borderRadius: 2,
+                          overflow: "hidden",
+                          border: (theme) => `1px solid ${theme.palette.divider}`,
                           width: "100%",
                           maxWidth: 300,
-                          maxHeight: 300,
-                          display: "block",
-                          objectFit: "contain",
-                          margin: "0 auto",
+                          backgroundColor: "background.paper",
                         }}
-                      />
-                    </Box>
-                  ) : (
-                    <Box
-                      sx={{
-                        flexGrow: 1,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        border: (theme) => `1px dashed ${theme.palette.divider}`,
-                        borderRadius: 2,
-                        p: 3,
-                      }}
-                    >
-                      <Typography variant="body2" color="text.secondary">
-                        Select a layout row to view or upload its reference photo.
-                      </Typography>
-                    </Box>
+                      >
+                        <img
+                          src={photoSrc}
+                          alt="Planogram reference"
+                          style={{
+                            width: "100%",
+                            maxWidth: 300,
+                            height: 300,
+                            display: "block",
+                            objectFit: "contain",
+                            backgroundColor: "#fff",
+                          }}
+                        />
+                      </Box>
+                    ) : (
+                      <Box
+                        sx={{
+                          width: "100%",
+                          maxWidth: 300,
+                          minHeight: 200,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          border: (theme) => `1px dashed ${theme.palette.divider}`,
+                          borderRadius: 2,
+                          p: 3,
+                        }}
+                      >
+                        <Typography variant="body2" color="text.secondary" align="center">
+                          Select a layout row to view or upload its reference photo.
+                        </Typography>
+                      </Box>
+                    )}
+
+                    {xyzValid && (
+                      <Box
+                        sx={{
+                          borderRadius: 2,
+                          border: (theme) => `1px solid ${theme.palette.divider}`,
+                          p: 1,
+                          backgroundColor: "background.paper",
+                          width: 200,
+                          height: 200,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <OrientationPreview
+                          x={selectedPlanogram?.x}
+                          y={selectedPlanogram?.y}
+                          z={selectedPlanogram?.z}
+                          size={170}
+                          showLegend={false}
+                        />
+                      </Box>
+                    )}
+                  </Stack>
+
+                  {xyzValid && (
+                    <Typography variant="caption" color="text.secondary" align="center">
+                      X (width): {formatDecimal(selectedPlanogram?.x)} | Y (depth):{" "}
+                      {formatDecimal(selectedPlanogram?.y)} | Z (height): {formatDecimal(selectedPlanogram?.z)}
+                    </Typography>
+                  )}
+
+                  {selectedPlanogram && !xyzValid && (
+                    <Alert severity="warning" sx={{ mt: 1 }}>
+                      XYZ coordinates are missing or invalid. Please enter numeric values for
+                      X, Y and Z.
+                    </Alert>
                   )}
 
                   <Divider />
