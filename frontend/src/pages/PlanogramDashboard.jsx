@@ -46,6 +46,7 @@ const emptyForm = {
   internalId: "",
   moduleId: "",
   planogramId: "",
+  shelfId: "",
   x: "",
   y: "",
   z: "",
@@ -100,6 +101,7 @@ const resolveBackendBase = () => {
 export default function PlanogramDashboard() {
   const [internalIdInput, setInternalIdInput] = useState("");
   const [planogramIdFilter, setPlanogramIdFilter] = useState("");
+  const [shelfFilter, setShelfFilter] = useState("");
   const [moduleFilter, setModuleFilter] = useState("");
   const [missingXyzFilter, setMissingXyzFilter] = useState(false);
   const [missingPhotoFilter, setMissingPhotoFilter] = useState(false);
@@ -220,12 +222,14 @@ export default function PlanogramDashboard() {
 
     const trimmedInternalId = internalIdInput.trim();
     const trimmedPlanogramId = planogramIdFilter.trim();
+    const trimmedShelfId = shelfFilter.trim();
     const trimmedModule = moduleFilter.trim();
     const paddedInternalId = padInternalId(trimmedInternalId);
 
     const hasFilter =
       trimmedInternalId ||
       trimmedPlanogramId ||
+      trimmedShelfId ||
       trimmedModule ||
       missingXyzFilter ||
       missingPhotoFilter;
@@ -242,6 +246,7 @@ export default function PlanogramDashboard() {
     const filters = {
       internalId: paddedInternalId || undefined,
       planogramId: trimmedPlanogramId || undefined,
+      shelfId: trimmedShelfId || undefined,
       moduleId: trimmedModule || undefined,
       missingXyz: missingXyzFilter ? "true" : undefined,
       missingPhoto: missingPhotoFilter ? "true" : undefined,
@@ -268,6 +273,7 @@ export default function PlanogramDashboard() {
       internalId: normalizedInternalId,
       sifraArt: autoSifra,
       moduleId: formValues.moduleId.trim(),
+      shelfId: formValues.shelfId.trim(),
       x: normalizeNumber(formValues.x),
       y: normalizeNumber(formValues.y),
       z: normalizeNumber(formValues.z),
@@ -329,6 +335,7 @@ export default function PlanogramDashboard() {
       internalId: planogram.internalId ?? "",
       moduleId: planogram.moduleId ?? "",
       planogramId: planogram.planogramId ?? "",
+      shelfId: planogram.shelfId ?? "",
       x: planogram.x ?? "",
       y: planogram.y ?? "",
       z: planogram.z ?? "",
@@ -634,6 +641,14 @@ export default function PlanogramDashboard() {
                 </Grid>
                 <Grid item xs={12} md={4}>
                   <TextField
+                    label="Shelf ID (optional)"
+                    value={shelfFilter}
+                    onChange={(event) => setShelfFilter(event.target.value)}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
                     label="Module (optional)"
                     value={moduleFilter}
                     onChange={(event) => setModuleFilter(event.target.value)}
@@ -688,6 +703,7 @@ export default function PlanogramDashboard() {
                     onClick={() => {
                       setInternalIdInput("");
                       setPlanogramIdFilter("");
+                      setShelfFilter("");
                       setModuleFilter("");
                       setMissingXyzFilter(false);
                       setMissingPhotoFilter(false);
@@ -727,6 +743,7 @@ export default function PlanogramDashboard() {
                     <TableCell>Sifra Art</TableCell>
                     <TableCell>Name</TableCell>
                     <TableCell>Planogram</TableCell>
+                    <TableCell>Shelf</TableCell>
                     <TableCell>Module</TableCell>
                     <TableCell>X</TableCell>
                     <TableCell>Y</TableCell>
@@ -739,7 +756,7 @@ export default function PlanogramDashboard() {
                 <TableBody>
                   {planograms.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={10}>
+                      <TableCell colSpan={11}>
                         <Typography
                           variant="body2"
                           color="text.secondary"
@@ -780,6 +797,13 @@ export default function PlanogramDashboard() {
                               color="primary"
                               variant="outlined"
                             />
+                          ) : (
+                            <Chip size="small" label="N/A" />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {planogram.shelfId ? (
+                            <Chip size="small" label={planogram.shelfId} color="secondary" variant="outlined" />
                           ) : (
                             <Chip size="small" label="N/A" />
                           )}
@@ -904,6 +928,14 @@ export default function PlanogramDashboard() {
                         onChange={(event) =>
                           setFormValue("planogramId", event.target.value)
                         }
+                        fullWidth
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        label="Shelf ID"
+                        value={formValues.shelfId}
+                        onChange={(event) => setFormValue("shelfId", event.target.value)}
                         fullWidth
                       />
                     </Grid>

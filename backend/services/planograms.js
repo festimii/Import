@@ -64,6 +64,8 @@ export const ensurePlanogramSchema = async () => {
       ALTER TABLE dbo.PlanogramLayout ADD PhotoUrl NVARCHAR(500) NULL;
     IF COL_LENGTH('dbo.PlanogramLayout', 'PhotoOriginalName') IS NULL
       ALTER TABLE dbo.PlanogramLayout ADD PhotoOriginalName NVARCHAR(255) NULL;
+    IF COL_LENGTH('dbo.PlanogramLayout', 'Shelf_ID') IS NULL
+      ALTER TABLE dbo.PlanogramLayout ADD Shelf_ID NVARCHAR(100) NULL;
 
     IF NOT EXISTS (
       SELECT 1
@@ -86,7 +88,25 @@ export const mapPlanogramRecord = (record) => ({
   y: toNumber(record?.Y),
   z: toNumber(record?.Z),
   planogramId: record?.Planogram_ID ?? null,
+  shelfId: record?.Shelf_ID ?? null,
   photoUrl: record?.PhotoUrl ?? null,
   photoOriginalName: record?.PhotoOriginalName ?? null,
   articleName: record?.ImeArt ?? null,
 });
+
+export const ensureShelfLayoutSchema = async () => {
+  const pool = await planogramPoolPromise;
+  await pool.request().batch(`
+    IF OBJECT_ID('dbo.PlanogramShelfLayout', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.PlanogramShelfLayout (
+        Shelf_ID NVARCHAR(100) NOT NULL,
+        Internal_ID VARCHAR(20) NOT NULL,
+        Sifra_Art VARCHAR(20) NOT NULL,
+        PosXmm DECIMAL(18, 2) NOT NULL,
+        PosZmm DECIMAL(18, 2) NOT NULL,
+        CONSTRAINT PK_PlanogramShelfLayout PRIMARY KEY (Shelf_ID, Internal_ID, Sifra_Art)
+      );
+    END;
+  `);
+};

@@ -8,6 +8,7 @@ import { planogramPoolPromise } from "../db_planogram.js";
 import {
   ensurePlanogramPhotoDirSync,
   ensurePlanogramSchema,
+  ensureShelfLayoutSchema,
   getPlanogramPhotoDir,
   mapPlanogramRecord,
 } from "../services/planograms.js";
@@ -119,6 +120,7 @@ router.get(
     const internalIdRaw = req.params.internalId;
     const internalId = normalizeInternalId(internalIdRaw);
     const planogramId = normalizeText(req.query.planogramId);
+    const shelfId = normalizeText(req.query.shelfId, 100);
     const moduleId = normalizeText(req.query.moduleId);
     const missingXyz = parseBoolean(req.query.missingXyz);
     const missingPhoto = parseBoolean(req.query.missingPhoto);
@@ -139,11 +141,13 @@ router.get(
       const applyFilters = (req) => {
         req.input("Internal_ID", sql.VarChar(20), internalId);
         if (planogramId) req.input("Planogram_ID", sql.VarChar(20), planogramId);
+        if (shelfId) req.input("Shelf_ID", sql.NVarChar(100), shelfId);
         if (moduleId) req.input("Module_ID", sql.VarChar(20), moduleId);
         return req;
       };
 
       if (planogramId) whereParts.push("p.Planogram_ID = @Planogram_ID");
+      if (shelfId) whereParts.push("p.Shelf_ID = @Shelf_ID");
       if (moduleId) whereParts.push("p.Module_ID = @Module_ID");
       if (missingXyz) whereParts.push("(p.X IS NULL OR p.Y IS NULL OR p.Z IS NULL)");
       if (missingPhoto)
@@ -240,16 +244,17 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
   const internalIdRaw = req.query.internalId;
   const internalId = normalizeInternalId(internalIdRaw);
   const planogramId = normalizeText(req.query.planogramId);
+  const shelfId = normalizeText(req.query.shelfId, 100);
   const moduleId = normalizeText(req.query.moduleId);
   const missingXyz = parseBoolean(req.query.missingXyz);
   const missingPhoto = parseBoolean(req.query.missingPhoto);
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const pageSize = Math.max(1, Math.min(200, parseInt(req.query.pageSize, 10) || 50));
 
-  if (!internalId && !planogramId && !moduleId && !missingXyz && !missingPhoto) {
+  if (!internalId && !planogramId && !shelfId && !moduleId && !missingXyz && !missingPhoto) {
     return res.status(400).json({
       message:
-        "Provide at least one filter: internalId, planogramId, moduleId, missingXyz or missingPhoto.",
+        "Provide at least one filter: internalId, planogramId, shelfId, moduleId, missingXyz or missingPhoto.",
     });
   }
 
@@ -263,6 +268,9 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
     }
     if (planogramId) {
       conditions.push("p.Planogram_ID = @Planogram_ID");
+    }
+    if (shelfId) {
+      conditions.push("p.Shelf_ID = @Shelf_ID");
     }
     if (moduleId) {
       conditions.push("p.Module_ID = @Module_ID");
@@ -309,6 +317,10 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
       dataRequest.input("Planogram_ID", sql.VarChar(20), planogramId);
       countRequest.input("Planogram_ID", sql.VarChar(20), planogramId);
     }
+    if (shelfId) {
+      dataRequest.input("Shelf_ID", sql.NVarChar(100), shelfId);
+      countRequest.input("Shelf_ID", sql.NVarChar(100), shelfId);
+    }
     if (moduleId) {
       dataRequest.input("Module_ID", sql.VarChar(20), moduleId);
       countRequest.input("Module_ID", sql.VarChar(20), moduleId);
@@ -342,7 +354,7 @@ router.get("/search", verifyRole(allowedRoles), async (req, res) => {
 });
 
 router.post("/", verifyRole(allowedRoles), async (req, res) => {
-  const { internalId, sifraArt, moduleId, x, y, z, planogramId } = req.body;
+  const { internalId, sifraArt, moduleId, x, y, z, planogramId, shelfId } = req.body;
   const normalizedInternalId = normalizeInternalId(internalId);
   const normalizedSifraArt = normalizeText(sifraArt);
 
@@ -364,6 +376,7 @@ router.post("/", verifyRole(allowedRoles), async (req, res) => {
       .input("Y", sql.Decimal(18, 2), toDecimal(y))
       .input("Z", sql.Decimal(18, 2), toDecimal(z))
       .input("Planogram_ID", sql.VarChar(20), normalizeText(planogramId))
+      .input("Shelf_ID", sql.NVarChar(100), normalizeText(shelfId, 100))
       .query(`
         IF EXISTS (
           SELECT 1 FROM dbo.PlanogramLayout
@@ -375,16 +388,17 @@ router.post("/", verifyRole(allowedRoles), async (req, res) => {
               X = @X,
               Y = @Y,
               Z = @Z,
-              Planogram_ID = @Planogram_ID
+              Planogram_ID = @Planogram_ID,
+              Shelf_ID = @Shelf_ID
           WHERE Internal_ID = @Internal_ID AND Sifra_Art = @Sifra_Art;
         END
         ELSE
         BEGIN
           INSERT INTO dbo.PlanogramLayout (
-            Internal_ID, Sifra_Art, Module_ID, X, Y, Z, Planogram_ID
+            Internal_ID, Sifra_Art, Module_ID, X, Y, Z, Planogram_ID, Shelf_ID
           )
           VALUES (
-            @Internal_ID, @Sifra_Art, @Module_ID, @X, @Y, @Z, @Planogram_ID
+            @Internal_ID, @Sifra_Art, @Module_ID, @X, @Y, @Z, @Planogram_ID, @Shelf_ID
           );
         END;
 
@@ -600,6 +614,101 @@ router.post(
     }
   }
 );
+
+// Shelf layout endpoints
+router.get("/shelf-layout", verifyRole(allowedRoles), async (req, res) => {
+  const shelfId = normalizeText(req.query.shelfId, 100);
+  if (!shelfId) {
+    return res.status(400).json({ message: "shelfId is required." });
+  }
+
+  try {
+    await ensureShelfLayoutSchema();
+    await ensurePlanogramSchema();
+    const pool = await planogramPoolPromise;
+    const result = await pool
+      .request()
+      .input("Shelf_ID", sql.NVarChar(100), shelfId).query(`
+        SELECT l.Shelf_ID, l.Internal_ID, l.Sifra_Art, l.PosXmm, l.PosZmm,
+               p.Planogram_ID, p.Module_ID, p.X, p.Y, p.Z, p.PhotoUrl, p.PhotoOriginalName,
+               k.ImeArt
+        FROM dbo.PlanogramShelfLayout l
+        LEFT JOIN dbo.PlanogramLayout p
+          ON l.Shelf_ID = p.Shelf_ID AND l.Internal_ID = p.Internal_ID AND l.Sifra_Art = p.Sifra_Art
+        LEFT JOIN dbo.KatArt k ON p.Sifra_Art = k.Sifra_Art
+        WHERE l.Shelf_ID = @Shelf_ID
+        ORDER BY l.PosZmm, l.PosXmm, l.Sifra_Art;
+      `);
+
+    const items = result.recordset.map((record) => ({
+      ...mapPlanogramRecord(record),
+      shelfId: record?.Shelf_ID ?? shelfId,
+      posXmm: toDecimal(record?.PosXmm),
+      posZmm: toDecimal(record?.PosZmm),
+    }));
+
+    res.json({ shelfId, items });
+  } catch (error) {
+    console.error("Shelf layout fetch error:", error.message);
+    res.status(500).json({ message: "Unable to load shelf layout." });
+  }
+});
+
+router.post("/shelf-layout", verifyRole(allowedRoles), async (req, res) => {
+  const shelfId = normalizeText(req.body?.shelfId, 100);
+  const positions = Array.isArray(req.body?.positions) ? req.body.positions : [];
+
+  if (!shelfId) {
+    return res.status(400).json({ message: "shelfId is required." });
+  }
+  if (positions.length === 0) {
+    return res.status(400).json({ message: "positions array is required." });
+  }
+
+  const validRows = positions
+    .map((pos) => ({
+      internalId: normalizeInternalId(pos.internalId),
+      sifraArt: normalizeText(pos.sifraArt),
+      posXmm: toDecimal(pos.posXmm),
+      posZmm: toDecimal(pos.posZmm),
+    }))
+    .filter(
+      (pos) => pos.internalId && pos.sifraArt && pos.posXmm !== null && pos.posZmm !== null
+    );
+
+  if (validRows.length === 0) {
+    return res.status(400).json({ message: "No valid positions to save." });
+  }
+
+  try {
+    await ensureShelfLayoutSchema();
+    const pool = await planogramPoolPromise;
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    await new sql.Request(transaction)
+      .input("Shelf_ID", sql.NVarChar(100), shelfId)
+      .query(`DELETE FROM dbo.PlanogramShelfLayout WHERE Shelf_ID = @Shelf_ID;`);
+
+    for (const row of validRows) {
+      await new sql.Request(transaction)
+        .input("Shelf_ID", sql.NVarChar(100), shelfId)
+        .input("Internal_ID", sql.VarChar(20), row.internalId)
+        .input("Sifra_Art", sql.VarChar(20), row.sifraArt)
+        .input("PosXmm", sql.Decimal(18, 2), row.posXmm)
+        .input("PosZmm", sql.Decimal(18, 2), row.posZmm).query(`
+          INSERT INTO dbo.PlanogramShelfLayout (Shelf_ID, Internal_ID, Sifra_Art, PosXmm, PosZmm)
+          VALUES (@Shelf_ID, @Internal_ID, @Sifra_Art, @PosXmm, @PosZmm);
+        `);
+    }
+
+    await transaction.commit();
+    res.status(201).json({ message: "Shelf layout saved.", positions: validRows.length });
+  } catch (error) {
+    console.error("Shelf layout save error:", error.message);
+    res.status(500).json({ message: "Unable to save shelf layout." });
+  }
+});
 
 router.use((err, _req, res, _next) => {
   if (err instanceof multer.MulterError) {

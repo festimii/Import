@@ -17,10 +17,12 @@ dist/
 build/
 coverage/
 logs/
+data/
 *.log
 *.pid
 *.seed
 *.pid.lock
+
 
 # OS & Editor files
 .DS_Store

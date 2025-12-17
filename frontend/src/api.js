@@ -30,7 +30,7 @@ const resolveBaseURL = () => {
 
   // Default to the LAN backend if nothing is configured.
   if (typeof window === "undefined") {
-    return "http://192.168.100.35:5000/api";
+    return "http://localhost:5000/api";
   }
 
   const hostname = window.location.hostname || "localhost";
@@ -55,13 +55,11 @@ API.interceptors.response.use(
   (error) => {
     const status = error?.response?.status;
     if (status === 401 || status === 403) {
+      const hadToken = Boolean(localStorage.getItem("token"));
       localStorage.removeItem("token");
       localStorage.removeItem("role");
-      if (typeof window !== "undefined") {
-        const { pathname } = window.location;
-        if (pathname !== "/" && pathname !== "/register") {
-          window.location.replace("/");
-        }
+      if (typeof window !== "undefined" && hadToken) {
+        window.location.replace("/");
       }
     }
 
